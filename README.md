@@ -16,6 +16,10 @@
 
 开关：保留繁体、保留英文、只用词库候选、过滤生僻字、候选数量（3–8）。另外可以自己加词条（优先于词库）和排除词条。
 
+## 适用环境
+
+iOS 15–17，rootless 与 roothide 越狱都可以。两个包由同一套脚本产出：rootless 包在 GitHub Actions 上打（Actions ▸ Build KeyBridge，只出 `-rootless.deb`），roothide 包在本机 Apelin 构建。装完在设置页导入词库，不用重启；后台状态看 `/var/mobile/Library/Keyboard/KeyBridge/install.log` 与 `KeyBridgeInjector.json`。
+
 ## 致谢
 
 特别感谢 **i_82**（Apelin 的作者）提供的 Apelin，辅助本项目的开发。

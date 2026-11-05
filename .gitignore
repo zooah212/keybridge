@@ -1,0 +1,9 @@
+# 构建产物与临时目录：由 Apelin/build.sh 与 Tests/run.sh 生成，不进仓库。
+packages/
+*.deb
+*.dylib
+*.o
+Tests/.run-*
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,17 @@
+# 行尾统一：维护脚本（postinst/prerm）、构建脚本与源码在仓库里必须是 LF。
+# 带 CRLF 的 #!/bin/sh 在设备上会被 dpkg 当成不认识的解释器，装完守护进程根本不注册。
+* text=auto
+*.sh text eol=lf
+*.m text eol=lf
+*.mm text eol=lf
+*.h text eol=lf
+*.c text eol=lf
+postinst text eol=lf
+prerm text eol=lf
+*.plist text eol=lf
+*.entitlements text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.png binary
+*.tbd text eol=lf

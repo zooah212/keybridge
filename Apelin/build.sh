@@ -7,10 +7,43 @@ set -eu
 : "${APELIN_ARCHITECTURE:?}"
 : "${APELIN_BUILD_ID:?}"
 : "${TMPDIR:?}"
-: "${APELIN_PREFIX?}" # set, and empty on roothide
 : "${SDKROOT:?}"
 
 cd "$APELIN_PROJECT_ROOT"
+
+# 打包形态：rootless 的文件落在 /var/jb 前缀下（iOS 15 起用），roothide 的前缀为空
+# （包内写真实根路径，装机时由 vroot 改写）。没显式给 KEYBRIDGE_SCHEME 时按 Apelin
+# 传下的 APELIN_PREFIX 推断：空即 roothide，非空即 rootless。
+# 单独成函数是为了 Tests/test_build_mode.py 能只跑这段派生逻辑，不碰编译器。
+kb_resolve_scheme() {
+  scheme="${KEYBRIDGE_SCHEME:-}"
+  prefix="${APELIN_PREFIX:-}"
+  if [ -z "$scheme" ]; then
+    case "$prefix" in
+      ""|"/") scheme=roothide ;;
+      *) scheme=rootless ;;
+    esac
+  fi
+  case "$scheme" in
+    rootless)
+      prefix="${prefix%/}"
+      [ -n "$prefix" ] || prefix=/var/jb
+      ;;
+    roothide) prefix="" ;;
+    *) echo "error: KEYBRIDGE_SCHEME must be rootless or roothide" >&2; return 1 ;;
+  esac
+  # 上界不再写死：和 SwipeDeck 一样只声明下限，iOS 15/16/17 都能装。
+  min_ios="${KEYBRIDGE_MIN_IOS:-15.0}"
+  version="${KEYBRIDGE_VERSION:-0.0.2}"
+  firmware_dep="firmware (>= $min_ios)"
+  # 一行一个字段：firmware 的值本身带空格，写成一行会被下游拆分切碎。
+  printf 'scheme=%s\nprefix=%s\nmin_ios=%s\nversion=%s\nfirmware=%s\n' \
+    "$scheme" "$prefix" "$min_ios" "$version" "$firmware_dep"
+}
+kb_resolve_scheme
+
+# 只要解析结果、不编译：CI 用它读版本与形态，避免同一个版本号在脚本和 workflow 里各写一遍。
+if [ "${KEYBRIDGE_PRINT_VARS_ONLY:-}" = "1" ]; then exit 0; fi
 
 case "$APELIN_ARCHITECTURE" in
   iphoneos-arm64e) arches="arm64e" ;;
@@ -38,7 +71,7 @@ compile_objc() {
   arch=$1 out=$2
   for source in ImportPreferences/KBImportController.m; do
     name=$(basename "$source" .m)
-    clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=16.3 -O2 \
+    clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min="${KEYBRIDGE_MIN_IOS:-15.0}" -O2 \
       -fobjc-arc -fblocks -Wall -Wextra \
       -I Importer -I Apelin/include \
       -c "$source" -o "$out/$name.o"
@@ -47,7 +80,7 @@ compile_objc() {
 
 link_bundle() {
   arch=$1 out=$2
-  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=16.3 -bundle -fobjc-arc \
+  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min="${KEYBRIDGE_MIN_IOS:-15.0}" -bundle -fobjc-arc \
     -o "$out/KeyBridgePreferences" "$out"/KBImportController.o \
     -F Apelin/stubs -framework Preferences \
     -framework Foundation -framework UIKit -framework UniformTypeIdentifiers -framework CoreGraphics
@@ -69,7 +102,7 @@ link_probe() {
       ;;
     *) echo "error: KEYBRIDGE_LOOKUP_BENCHMARK must be 0 or 1" >&2; exit 1 ;;
   esac
-  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=16.3 -O2 \
+  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min="${KEYBRIDGE_MIN_IOS:-15.0}" -O2 \
     -fobjc-arc -fblocks -dynamiclib -DKB_LOOKUP_BENCHMARK="$diagnostics" \
     -DAPELIN_BUILD_ID="\"$APELIN_BUILD_ID\"" \
     -o "$out/KeyBridgeProbe.dylib" Probe/KeyBridgeProbe.m \
@@ -79,7 +112,7 @@ link_probe() {
 # 守护进程（root）：ellekit 不注入系统守护进程，由它把探针送进 kbd。
 link_injector() {
   arch=$1 out=$2
-  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=16.3 -O2 \
+  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min="${KEYBRIDGE_MIN_IOS:-15.0}" -O2 \
     -fobjc-arc -DNOUNCRYPT -DMINIZIP_FOPEN_NO_64 -o "$out/keybridge-injector" Injector/KeyBridgeInjector.m Injector/KeyBridgeConvert.m Injector/KeyBridgeUnzip.m Injector/KeyBridgeCustom.m \
     Importer/vendor/minizip/unzip.c Importer/vendor/minizip/ioapi.c \
     -framework Foundation -lz -I Importer/vendor/minizip
@@ -112,13 +145,13 @@ chmod 0755 "$bundle/KeyBridgePreferences"
 chmod 0644 "$bundle/Info.plist"
 ldid -S "$bundle/KeyBridgePreferences"
 
-# 包内路径相对 bootstrap，roothide 下 APELIN_PREFIX 为空。
+# 包内路径相对 bootstrap：rootless 落在 /var/jb 下，roothide 前缀为空。
 payload="$stage/root"
-destination="$payload$APELIN_PREFIX"
+destination="$payload$prefix"
 mkdir -p "$destination/Library/PreferenceBundles" \
   "$destination/Library/PreferenceLoader/Preferences" \
   "$destination/Library/MobileSubstrate/DynamicLibraries" \
-  "$destination/usr/libexec" "$destination/usr/share/keybridge" "$payload/DEBIAN"
+  "$destination/usr/libexec" "$payload/DEBIAN"
 cp -R "$bundle" "$destination/Library/PreferenceBundles/"
 cp layout/Library/PreferenceLoader/Preferences/KeyBridge.plist \
   "$destination/Library/PreferenceLoader/Preferences/KeyBridge.plist"
@@ -132,9 +165,9 @@ ldid -S "$destination/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.dy
 cp "$injector" "$destination/usr/libexec/keybridge-injector"
 chmod 0755 "$destination/usr/libexec/keybridge-injector"
 ldid -SInjector/Injector.entitlements "$destination/usr/libexec/keybridge-injector"
-cp Injector/com.wm0104.keybridge.injector.plist.in \
-  "$destination/usr/share/keybridge/injector.plist.in"
-chmod 0644 "$destination/usr/share/keybridge/injector.plist.in"
+# LaunchDaemon plist 不在包里预置，由 postinst 根据当前越狱形态现场生成：
+# 安装环境里某个 dpkg/apt 环节可能把落盘 plist 转成 binary1，拿 sed 改它
+# 会当场改坏（launchd 拒注册且不留日志），所以不给它任何被改坏的机会。
 cp Injector/postinst "$payload/DEBIAN/postinst"
 cp Injector/prerm "$payload/DEBIAN/prerm"
 chmod 0755 "$payload/DEBIAN/postinst" "$payload/DEBIAN/prerm"
@@ -142,17 +175,17 @@ chmod 0755 "$payload/DEBIAN/postinst" "$payload/DEBIAN/prerm"
 {
   printf 'Package: com.wm0104.keybridge\n'
   printf 'Name: 词库桥接\n'
-  printf 'Version: 0.0.1\n'
+  printf 'Version: %s\n' "$version"
   printf 'Architecture: %s\n' "$APELIN_ARCHITECTURE"
   printf 'Description: Local Rime dictionary candidates for Apple Chinese 26-key and nine-key keyboards.\n'
   printf 'Icon: https://raw.githubusercontent.com/wm0104/keybridge/main/Assets/KeyBridge.png\n'
   printf 'Maintainer: wm0104\n'
   printf 'Author: wm0104\n'
   printf 'Section: Addons\n'
-  printf 'Depends: mobilesubstrate, preferenceloader, firmware (>= 16.3), firmware (<< 17.0)\n'
+  printf 'Depends: mobilesubstrate, preferenceloader, %s\n' "$firmware_dep"
 } > "$payload/DEBIAN/control"
 
-deb="$APELIN_PACKAGE_DIR/KeyBridge_0.0.1_${APELIN_ARCHITECTURE}.deb"
+deb="$APELIN_PACKAGE_DIR/KeyBridge_${version}_${APELIN_ARCHITECTURE}.deb"
 rm -f -- "$deb"
 if ! dpkg-deb --build --root-owner-group "$payload" "$deb" 2>"$stage/dpkg.err"; then
   rm -f -- "$deb"

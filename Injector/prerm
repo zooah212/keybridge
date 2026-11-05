@@ -1,6 +1,7 @@
 #!/bin/sh
 # 卸载时先停掉注入守护进程，再清掉我们生成的词库与索引；苹果自己的词库与学习词库一概不碰。
-set -e
+# 与 postinst 同款前缀探测：rootless 下 plist 在 /var/jb/Library/LaunchDaemons，
+# 少这一层就只是「进程被删掉、launchd 每 5 秒空拉一次已不存在的二进制」。
 
 # 升级不卸载、不清理；只有明确卸载才删除插件数据。
 case "${1:-}" in
@@ -8,18 +9,39 @@ case "${1:-}" in
     *) exit 0 ;;
 esac
 
-PLIST=/Library/LaunchDaemons/com.wm0104.keybridge.injector.plist
-launchctl unload "${PLIST:?}" >/dev/null 2>&1 || true
-rm -f "${PLIST:?}"
+if command -v jbroot >/dev/null 2>&1; then
+    PREFIX=""
+elif [ -n "$JB_ROOT" ]; then
+    PREFIX="$JB_ROOT"
+elif [ -f "/var/jb/var/lib/dpkg/status" ]; then
+    PREFIX="/var/jb"
+elif [ -f "/var/lib/dpkg/status" ]; then
+    PREFIX=""
+else
+    PREFIX="/var/jb"
+fi
+[ "$PREFIX" = "/" ] && PREFIX=""
+
+LABEL=com.wm0104.keybridge.injector
+for plist in "${PREFIX}/Library/LaunchDaemons/${LABEL}.plist" \
+             "/Library/LaunchDaemons/${LABEL}.plist"; do
+    [ -f "$plist" ] || continue
+    # KeepAlive=true：必须先断开拉起再杀，顺序反了会杀而不死。
+    launchctl unload "$plist" 2>/dev/null || true
+    launchctl bootout "system/$LABEL" 2>/dev/null || true
+    killall keybridge-injector 2>/dev/null || true
+    rm -f "$plist"
+done
+killall keybridge-injector 2>/dev/null || true
 
 # roothide 下真实根是 /rootfs，bootstrap 脚本里的 /var/mobile 指的是 jbroot 自己的 var；
-# 两处都清，避免只删到空目录。
-for ROOT in /rootfs /var/jb ""; do
+# rootless 下数据在真实 /var/mobile。几处都清，避免只删到空目录。
+for ROOT in /rootfs /var/jb "$PREFIX" ""; do
     KEYBOARD="$ROOT/var/mobile/Library/Keyboard"
-    [ -d "${KEYBOARD:?}" ] || continue
-    rm -rf "${KEYBOARD:?}/KeyBridge"
-    rm -f "${KEYBOARD:?}/KeyBridgeProbe-kbd.json" "${KEYBOARD:?}/KeyBridgeProbe-SpringBoard.json" \
-          "${KEYBOARD:?}/KeyBridgeInjector.json"
+    [ -d "$KEYBOARD" ] || continue
+    rm -rf "$KEYBOARD/KeyBridge"
+    rm -f "$KEYBOARD/KeyBridgeProbe-kbd.json" "$KEYBOARD/KeyBridgeProbe-SpringBoard.json" \
+          "$KEYBOARD/KeyBridgeInjector.json"
 done
 
 exit 0

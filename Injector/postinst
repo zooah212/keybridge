@@ -1,29 +1,152 @@
 #!/bin/sh
-# 把守护进程的 plist 写成当前 bootstrap 的真实路径，然后加载它。
-set -e
+# 守护进程注册：先把 plist 按当前越狱形态写出来，再交给 launchd，并把每一步
+# 结论落到安装日志。rootless / roothide / rootful 通用（前缀探测与自检思路取自
+# SwipeDeck、DebRecords 的实证方案）。
+#
+# 不用 set -e：这里的每一步都允许失败（老越狱没 jbroot、没 launchctl
+# bootstrap、目录属主改不动），失败也要把结论写完，否则用户端只剩一句
+# 「后台没反应」。
 
-JB=""
+# 1) 探测 jbroot 前缀。roothide 的 postinst 由 jbroot 视图内的 vroot shell/dpkg
+#    执行，工具只认视图路径，前缀必须为空（/usr/libexec 就是 jbroot 内路径）；
+#    填物理路径会被二次映射成 P/P/... ，launchctl 当场报 109 Invalid property list。
 if command -v jbroot >/dev/null 2>&1; then
-    JB=$(jbroot 2>/dev/null || true)
+    PREFIX=""
+    ROOTHIDE=1
+elif [ -n "$JB_ROOT" ]; then
+    PREFIX="$JB_ROOT"
+elif [ -f "/var/jb/var/lib/dpkg/status" ]; then
+    PREFIX="/var/jb"
+elif [ -f "/var/lib/dpkg/status" ]; then
+    PREFIX=""
+else
+    PREFIX="/var/jb"
 fi
-JB=${JB%/}
-[ -n "$JB" ] || JB=/var/jb
+[ "$PREFIX" = "/" ] && PREFIX=""
 
-TEMPLATE=/usr/share/keybridge/injector.plist.in
-PLIST=/Library/LaunchDaemons/com.wm0104.keybridge.injector.plist
+LABEL=com.wm0104.keybridge.injector
+PLIST="${PREFIX}/Library/LaunchDaemons/${LABEL}.plist"
+DAEMON="${PREFIX}/usr/libexec/keybridge-injector"
+SHELL_BIN="${PREFIX}/bin/sh"
 
-if [ -f "$TEMPLATE" ]; then
-    mkdir -p /Library/LaunchDaemons
-    sed "s|@JBROOT@|$JB|g" "$TEMPLATE" > "$PLIST"
-    chmod 0644 "$PLIST"
-    launchctl unload "$JB$PLIST" >/dev/null 2>&1 || true
-    launchctl load -w "$JB$PLIST" >/dev/null 2>&1 || true
+# 2) 词库目录：面板（mobile）与守护进程（root）共用，面板自己建不了，这里补上。
+#    rootless / rootful 下面板与守护进程看到的就是真实 /var/mobile；roothide 下
+#    postinst 跑在 jbroot 视图里，那个 /var/mobile 是 jbroot 自己的 var，用户的
+#    真家还得从物理根（jbroot 给出的路径）往 private 里建一份。
+JBPHYS=""
+if command -v jbroot >/dev/null 2>&1; then
+    JBPHYS=$(jbroot 2>/dev/null || true)
+fi
+JBPHYS="${JBPHYS%/}"
+CREATED=""
+for dir in "/var/mobile/Library/Keyboard/KeyBridge" \
+           ${JBPHYS:+"$JBPHYS/private/var/mobile/Library/Keyboard/KeyBridge"}; do
+    mkdir -p "$dir/incoming" 2>/dev/null || continue
+    chown -R mobile:mobile "$dir" 2>/dev/null
+    chmod 0777 "$dir/incoming" 2>/dev/null
+    CREATED="$CREATED $dir"
+done
+
+# 3) 安装日志：落在词库目录里，用户在 Filza 里就能看到；建不出来才退回 /tmp。
+LOG=""
+for dir in $CREATED "/var/mobile/Library/Keyboard/KeyBridge"; do
+    if [ -d "$dir" ] && : >>"$dir/install.log" 2>/dev/null; then LOG="$dir/install.log"; break; fi
+done
+[ -n "$LOG" ] || LOG="/tmp/${LABEL}-install.log"
+say() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG" 2>/dev/null; }
+chmod 0644 "$LOG" 2>/dev/null
+chown mobile:mobile "$LOG" 2>/dev/null
+say "postinst begin prefix=\"${PREFIX:-<jbroot-view|real-root>}\" uid=$(id -u) dirs=$CREATED"
+
+if [ -f "$DAEMON" ]; then
+    say "bin OK: $DAEMON $(ls -l "$DAEMON" 2>/dev/null | awk '{print $1, $3, $4}')"
+else
+    say "bin MISSING: $DAEMON 不存在（deb 未含守护进程，或前缀探测错）"
 fi
 
-# 设置面板以 mobile 运行，需要一个它能写的目录来放导入的词表。
-KEYBOARD="$JB/private/var/mobile/Library/Keyboard/KeyBridge"
-mkdir -p "$KEYBOARD/incoming"
-chown -R mobile:mobile "$KEYBOARD/incoming" 2>/dev/null || true
-chmod 0777 "$KEYBOARD/incoming" 2>/dev/null || true
+# 4) 无条件重新生成 plist，不对落盘件做原地 sed：安装环节可能把它转成 binary1
+#    格式，文本替换会让长度字节对不上、整份文件损坏，launchd 直接拒注册。
+mkdir -p "${PREFIX}/Library/LaunchDaemons" 2>/dev/null
+if [ -n "$ROOTHIDE" ]; then
+    # roothide：直接 exec，与 16.3 上已验证的形态一致。
+    PROG_ARGS="	<array>
+		<string>$DAEMON</string>
+	</array>"
+else
+    # rootless：开机后 launchd 会在 uncrush 那一瞬同时拉起所有 job，直接 exec 的
+    # 进程有见过「running 却从没进 main」的僵态，KeepAlive 于是永不重拉。用 sh 先
+    # 等 20 秒越过这个窗口（exec 原地替换 sh，不多留进程）。
+    PROG_ARGS="	<array>
+		<string>$SHELL_BIN</string>
+		<string>-c</string>
+		<string>sleep 20; exec $DAEMON</string>
+	</array>"
+fi
+cat >"$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$LABEL</string>
+	<key>ProgramArguments</key>
+$PROG_ARGS
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>ThrottleInterval</key>
+	<integer>5</integer>
+	<key>UserName</key>
+	<string>root</string>
+</dict>
+</plist>
+EOF
+if [ -f "$PLIST" ]; then
+    chmod 0644 "$PLIST" 2>/dev/null
+    chown 0:0 "$PLIST" 2>/dev/null
+    # 首行自检：binary1 会被 launchd 拒（判据只用 shell read，不信环境里那个
+    # 把 lint 当 keypath 的 plutil）。
+    IFS= read -r firstline <"$PLIST" 2>/dev/null
+    case "$firstline" in
+        bplist*) say "plist【坏】binary1：$PLIST" ;;
+        '<'*)    say "plist ok: $PLIST" ;;
+        *)       say "plist【怪】首行=[$firstline]：$PLIST" ;;
+    esac
+else
+    say "plist 写入失败（目录不可写？）：$PLIST"
+fi
 
+# 5) KeepAlive=true：先卸旧的断开拉起，再杀旧进程，然后重载。
+killall keybridge-injector 2>/dev/null
+launchctl unload "$PLIST" 2>/dev/null
+launchctl bootout "system/$LABEL" 2>/dev/null
+launchctl load "$PLIST" 2>/dev/null
+say "load rc=$?"
+
+# 6) iOS 15+ rootless 上见过 legacy load 返回 0 但服务没进名册，所以不信退出码，
+#    只信能不能查到这个 label；查不到就改用现代 bootstrap 再试一次。
+if ! launchctl list "$LABEL" >/dev/null 2>&1; then
+    launchctl bootstrap system "$PLIST" 2>/dev/null
+    say "不在名册里 -> bootstrap system rc=$?"
+fi
+
+# 7) 结论行：有 PID 才算真跑起来。已注册但没 PID 就 kickstart 踢一脚。
+pid=$(launchctl list "$LABEL" 2>/dev/null | grep '"PID"' | tr -cd '0-9')
+if [ -z "$pid" ]; then
+    launchctl kickstart -kp "system/$LABEL" 2>/dev/null
+    sleep 2
+    pid=$(launchctl list "$LABEL" 2>/dev/null | grep '"PID"' | tr -cd '0-9')
+fi
+if [ -n "$pid" ]; then
+    say "loaded: $LABEL PID=$pid"
+elif launchctl list "$LABEL" >/dev/null 2>&1; then
+    say "registered but no PID：已注册还没跑起来，重启后由 RunAtLoad 拉起"
+else
+    say "NOT loaded: launchd 未接受该 plist"
+fi
+
+echo "词库桥接守护进程注册结论见 $LOG"
 exit 0

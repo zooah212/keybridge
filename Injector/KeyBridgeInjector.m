@@ -64,6 +64,9 @@ NSUInteger KBExtractDictionaryZip(NSString *zipPath, NSString *destination, void
 NSUInteger KBRebuildCustomIndexes(NSString *keyboard, void (^log)(NSString *));
 static os_log_t KBInjectorLog;
 static NSString *KBStatePath;
+// 这轮真正用到的注入工具与探针路径，只给状态文件做诊断用。
+static NSString *KBInjectToolPath;
+static NSString *KBInjectDylibPath;
 // 转换/重建放到后台队列：主循环每 2 秒的注入检查不能被一次一分钟的重建拖住。
 static dispatch_queue_t KBCommandQueue;
 static BOOL KBCommandRunning;
@@ -72,8 +75,16 @@ static NSMutableDictionary *KBTask;
 static void KBTaskWrite(NSString *keyboard) {
     if (!KBTask) return;
     KBTask[@"updatedAt"] = @([NSDate date].timeIntervalSince1970);
-    [[NSJSONSerialization dataWithJSONObject:KBTask options:0 error:NULL]
-        writeToFile:[keyboard stringByAppendingPathComponent:@"import-task.json"] atomically:YES];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:KBTask options:0 error:NULL];
+    // 进度文件写不进去，面板就只剩「等待后台接收任务」那一句，必须留下痕迹。
+    // 只在「能写」和「写不进」之间切换时各记一条，别每 2 秒刷屏。
+    static BOOL reportedFailure;
+    if ([data writeToFile:[keyboard stringByAppendingPathComponent:@"import-task.json"] atomically:YES]) {
+        reportedFailure = NO;
+    } else if (!reportedFailure) {
+        reportedFailure = YES;
+        os_log_error(KBInjectorLog, "task write failed under %{public}@", keyboard);
+    }
 }
 static void KBTaskBegin(NSString *keyboard, NSMutableDictionary *summary, double stamp) {
     summary[@"requestAt"] = @(stamp);
@@ -101,6 +112,27 @@ static NSString *KBRealPath(NSString *path) {
     return hasRootfs ? [@"/rootfs" stringByAppendingString:path] : path;
 }
 
+// 同一个相对路径在三种越狱形态下的落点：自己所在的 bootstrap 根、rootless 的
+// /var/jb、以及真实根视图。去重后按顺序当候选表用。
+static NSArray<NSString *> *KBBootCandidates(NSString *relative) {
+    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+    NSString *root = KBBootstrapRoot();
+    if (root.length) [paths addObject:[root stringByAppendingPathComponent:relative]];
+    for (NSString *base in @[@"/var/jb", @"/"]) {
+        NSString *path = [base stringByAppendingPathComponent:relative];
+        if (![paths containsObject:path]) [paths addObject:path];
+    }
+    return paths;
+}
+
+static NSString *KBFirstExisting(NSArray<NSString *> *candidates) {
+    NSFileManager *manager = [NSFileManager defaultManager];
+    for (NSString *path in candidates) {
+        if (path.length && [manager fileExistsAtPath:path]) return path;
+    }
+    return nil;
+}
+
 static void KBWriteState(NSDictionary *state) {
     if (!KBStatePath) return;
     NSData *data = [NSJSONSerialization dataWithJSONObject:state
@@ -116,18 +148,35 @@ static void KBWriteState(NSDictionary *state) {
     }
 }
 
-// 设置在 bootstrap 的 var/mobile/Library/Preferences 里。
-static NSString *KBPreferencesPath(void) {
-    NSString *root = KBBootstrapRoot();
-    if (root.length) {
-        return [root stringByAppendingPathComponent:@"var/mobile/Library/Preferences/com.wm0104.keybridge.plist"];
-    }
-    return KBRealPath(@"/var/mobile/Library/Preferences/com.wm0104.keybridge.plist");
+// 面板写的偏好文件落点随越狱形态而变：roothide 下守护进程看到的全在 jbroot 里
+// （bootstrap 根 + var/mobile），rootless / rootful 下面板写的就是真实 /var/mobile。
+// roothide 的物理根（/rootfs）也列上，与旧版回退路径保持一致。
+static NSArray<NSString *> *KBPreferencesCandidates(void) {
+    NSMutableArray<NSString *> *paths = [KBBootCandidates(@"var/mobile/Library/Preferences/com.wm0104.keybridge.plist") mutableCopy];
+    NSString *real = KBRealPath(@"/var/mobile/Library/Preferences/com.wm0104.keybridge.plist");
+    if (![paths containsObject:real]) [paths addObject:real];
+    return paths;
 }
 
-// 面板在沙盒里写不了 Keyboard 目录，所有指令都经这个偏好域传递。
+// 面板在沙盒里写不了 Keyboard 目录，所有指令都经这个偏好域传递。几份候选都读，
+// 取 requestStamp 最新的那份：面板每下一次指令都会刷这个时间戳，所以「最新」就是
+// 正在用的那一侧，另一侧就算留着换越狱前的旧文件也劫持不了指令。
+static NSString *KBPreferencesUsedPath;
+
 static NSDictionary *KBReadPrefs(void) {
-    return [NSDictionary dictionaryWithContentsOfFile:KBPreferencesPath()] ?: @{};
+    NSDictionary *newest = nil;
+    double newestStamp = -1;
+    KBPreferencesUsedPath = nil;
+    for (NSString *path in KBPreferencesCandidates()) {
+        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:path];
+        if (![prefs isKindOfClass:[NSDictionary class]] || !prefs.count) continue;
+        double stamp = [prefs[@"requestStamp"] doubleValue];
+        if (newest && stamp <= newestStamp) continue;
+        newest = prefs;
+        newestStamp = stamp;
+        KBPreferencesUsedPath = path;
+    }
+    return newest ?: @{};
 }
 
 static NSString *KBHandledPath(NSString *keyboard) {
@@ -154,7 +203,11 @@ static void KBEnsureDirectory(NSString *path) {
 static void KBWriteSummary(NSDictionary *summary, NSString *keyboard) {
     KBEnsureDirectory(keyboard);
     NSData *data = [NSJSONSerialization dataWithJSONObject:summary options:NSJSONWritingPrettyPrinted error:NULL];
-    [data writeToFile:[keyboard stringByAppendingPathComponent:@"last-import.json"] atomically:YES];
+    NSString *path = [keyboard stringByAppendingPathComponent:@"last-import.json"];
+    if (![data writeToFile:path atomically:YES]) {
+        // 回执写不进去，面板那边就永远停在「等待后台接收任务」：这条必须能在日志里查到。
+        os_log_error(KBInjectorLog, "summary write failed to %{public}@", path);
+    }
     @synchronized ([NSProcessInfo class]) {
         if ([KBTask[@"requestAt"] doubleValue] == [summary[@"requestAt"] doubleValue]) {
             KBTask[@"running"] = @NO;
@@ -801,8 +854,8 @@ static NSString *KBBootstrapRoot(void) {
 
 // 探针会在 kbd 里写状态；pid 对得上就不用再注入。
 static BOOL KBAlreadyInjected(pid_t target) {
-    for (NSString *path in @[@"/var/mobile/Library/Keyboard/KeyBridgeProbe-kbd.json",
-                             @"/rootfs/private/var/mobile/Library/Keyboard/KeyBridgeProbe-kbd.json"]) {
+    for (NSString *path in [KBBootCandidates(@"var/mobile/Library/Keyboard/KeyBridgeProbe-kbd.json")
+                            arrayByAddingObjectsFromArray:@[@"/rootfs/private/var/mobile/Library/Keyboard/KeyBridgeProbe-kbd.json"]]) {
         NSData *data = [NSData dataWithContentsOfFile:path];
         if (!data) continue;
         NSDictionary *state = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
@@ -813,12 +866,16 @@ static BOOL KBAlreadyInjected(pid_t target) {
     return NO;
 }
 
+// 注入工具与探针都按候选路径找：rootless 在 /var/jb 下，roothide 在守护进程自己的
+// 根视图里，少数越狱还会把它们装在真实根。选中哪条记进状态文件，下次查问题不用拆机器。
 static BOOL KBInject(pid_t target, NSString *root) {
-    NSString *tool = [root stringByAppendingPathComponent:@"usr/bin/opainject"];
-    NSString *dylib = [root stringByAppendingPathComponent:@"Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.dylib"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:tool] ||
-        ![[NSFileManager defaultManager] fileExistsAtPath:dylib]) {
-        os_log_error(KBInjectorLog, "missing tool or dylib under %{public}@", root);
+    NSString *tool = KBFirstExisting(KBBootCandidates(@"usr/bin/opainject"));
+    NSString *dylib = KBFirstExisting(KBBootCandidates(@"Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.dylib"));
+    KBInjectToolPath = tool;
+    KBInjectDylibPath = dylib;
+    if (!tool || !dylib) {
+        os_log_error(KBInjectorLog, "missing tool or dylib (root=%{public}@ tool=%{public}@ dylib=%{public}@)",
+                     root ?: @"?", tool ?: @"-", dylib ?: @"-");
         return NO;
     }
     char pidText[16];
@@ -924,8 +981,12 @@ int main(void) {
                     @"pidSeen": @(kbd),
                     @"injected": @(injected),
                     @"attempts": @(attempts),
+                    @"prefsPath": KBPreferencesUsedPath ?: @"-",
+                    @"keyboardDir": keyboard,
                     @"updatedAt": @([[NSDate date] timeIntervalSince1970])
                 } mutableCopy];
+                if (KBInjectToolPath) state[@"injectTool"] = KBInjectToolPath;
+                if (KBInjectDylibPath) state[@"injectDylib"] = KBInjectDylibPath;
                 if (kbd <= 0) {
                     injected = 0;
                     attempts = 0;

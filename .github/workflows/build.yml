@@ -1,0 +1,142 @@
+name: Build KeyBridge
+
+# 只出 rootless 包（iOS 15/16/17，前缀 /var/jb）。roothide 仍走本机 Apelin 构建：
+# 那边的包内路径与 jbroot 视图绑定，CI 上造不出来，也没有真机可验证。
+# 版本与形态参数都由 Apelin/build.sh 里的 kb_resolve_scheme 决定，这里不重复写死。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 包版本号（留空则用 build.sh 里的默认值）
+        required: false
+        type: string
+      configuration:
+        description: 构建配置
+        required: false
+        default: release
+        type: choice
+        options: [release, debug]
+
+jobs:
+  rootless:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # theos 只为拿 ldid 源码（Homebrew 没有可用 formula）；编译本身走
+      # Apelin/build.sh 的原生命令，不引入第二套构建系统。
+      - name: Setup Theos
+        uses: huami1314/theos-action@main
+
+      - name: Setup GNU Make
+        run: echo "$(brew --prefix)/opt/make/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Build ldid (if missing)
+        run: |
+          if [ ! -x "$THEOS/bin/ldid" ] && [ -d "$THEOS/vendor/ldid" ]; then
+            echo "→ Building ldid..."
+            pushd "$THEOS/vendor/ldid" > /dev/null
+            make -j"$(sysctl -n hw.ncpu)" 2>/dev/null || make
+            mkdir -p "$THEOS/bin"
+            cp -f ldid "$THEOS/bin/ldid"
+            popd > /dev/null
+          fi
+          export PATH="$THEOS/bin:$PATH"
+          command -v ldid || { echo "error: ldid unavailable" >&2; exit 1; }
+
+      - name: Install dpkg
+        run: brew install dpkg
+
+      - name: Toolchain paths
+        id: toolchain
+        run: |
+          echo "sdkroot=$(xcrun --sdk iphoneos --show-sdk-path)" >> "$GITHUB_OUTPUT"
+
+      - name: Clean packages
+        run: rm -rf packages && mkdir -p packages
+
+      - name: Resolve build vars
+        id: vars
+        env:
+          APELIN_PROJECT_ROOT: ${{ github.workspace }}
+          APELIN_PACKAGE_DIR: ${{ github.workspace }}/packages
+          APELIN_BOOTSTRAP: /var/jb
+          APELIN_ARCHITECTURE: iphoneos-arm64
+          APELIN_BUILD_ID: ${{ github.sha }}
+          APELIN_CONFIGURATION: ${{ inputs.configuration || 'release' }}
+          APELIN_PREFIX: /var/jb
+          KEYBRIDGE_SCHEME: rootless
+          KEYBRIDGE_PRINT_VARS_ONLY: "1"
+          SDKROOT: ${{ steps.toolchain.outputs.sdkroot }}
+        run: |
+          line=$(sh Apelin/build.sh)
+          echo "resolved: $line"
+          VERSION=$(printf '%s\n' "$line" | tr ' ' '\n' | sed -n 's/^version=//p')
+          INPUT='${{ inputs.version }}'
+          if [ -n "$INPUT" ]; then VERSION="$INPUT"; fi
+          if [ -z "$VERSION" ]; then echo "error: cannot resolve version" >&2; exit 1; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build rootless deb
+        env:
+          APELIN_PROJECT_ROOT: ${{ github.workspace }}
+          APELIN_PACKAGE_DIR: ${{ github.workspace }}/packages
+          APELIN_BOOTSTRAP: /var/jb
+          APELIN_ARCHITECTURE: iphoneos-arm64
+          APELIN_BUILD_ID: ${{ github.sha }}
+          APELIN_CONFIGURATION: ${{ inputs.configuration || 'release' }}
+          APELIN_PREFIX: /var/jb
+          KEYBRIDGE_SCHEME: rootless
+          KEYBRIDGE_VERSION: ${{ steps.vars.outputs.version }}
+          SDKROOT: ${{ steps.toolchain.outputs.sdkroot }}
+        run: |
+          # ldid 在 theos/bin 里，dpkg 在 Homebrew 里；PATH 只在这里补，不覆盖 runner 默认值
+          export PATH="$THEOS/bin:$(brew --prefix)/opt/make/libexec/gnubin:$PATH"
+          sh Apelin/build.sh
+
+      - name: Verify package layout
+        run: |
+          set -eu
+          export PATH="$(brew --prefix)/opt/dpkg/bin:$(brew --prefix)/bin:$PATH"
+          deb=$(find packages -maxdepth 1 -name '*.deb' -type f | head -1)
+          if [ -z "$deb" ]; then echo "error: no deb produced" >&2; exit 1; fi
+          echo "→ $deb"
+          dpkg-deb -f "$deb" Package Version Architecture Depends
+          # 包内文件清单：取每行最后一个字段并去掉开头的 ./（dpkg-deb -c 的列数会随文件类型变）
+          list=$(dpkg-deb -c "$deb" | awk '{print $NF}' | sed 's|^\./||')
+          printf '%s\n' "$list"
+          if printf '%s\n' "$list" | grep -v '^var/jb/' | grep -v '^DEBIAN/'; then
+            echo "error: 有文件不在 /var/jb 前缀下（rootless 包必须是这套布局）" >&2; exit 1
+          fi
+          for path in \
+            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/KeyBridgePreferences \
+            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/Info.plist \
+            var/jb/Library/PreferenceLoader/Preferences/KeyBridge.plist \
+            var/jb/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.dylib \
+            var/jb/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.plist \
+            var/jb/usr/libexec/keybridge-injector; do
+            if ! printf '%s\n' "$list" | grep -qx "$path"; then
+              echo "error: missing $path" >&2; exit 1
+            fi
+          done
+          if printf '%s\n' "$list" | grep -q 'injector\.plist\.in'; then
+            echo "error: 旧的 plist 模板还在包里（应由 postinst 现场生成）" >&2; exit 1
+          fi
+          echo "✓ rootless 布局校验通过"
+
+      - name: Prepare artifact
+        run: |
+          set -eu
+          deb=$(find packages -maxdepth 1 -name '*.deb' -type f | head -1)
+          if [ -z "$deb" ]; then echo "error: no deb produced" >&2; exit 1; fi
+          cp "$deb" "KeyBridge-${{ steps.vars.outputs.version }}-rootless.deb"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeyBridge-${{ steps.vars.outputs.version }}-rootless
+          path: KeyBridge-${{ steps.vars.outputs.version }}-rootless.deb

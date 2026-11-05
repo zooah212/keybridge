@@ -5,6 +5,15 @@
 - 设置页及链接下载须另做真机验证：导入超过 20 秒、离开再返回、网络失败、同名导入失败时旧词库保留。
 - `Injector/prerm` 仅在 `remove` 时清理，升级直接退出；已验证本机这次升级前后词库文件清单、大小、修改时间及 active 均保留。更新更早版本前仍须检查已安装的旧脚本并备份词库。
 
+## 打包形态与 CI
+
+- `Apelin/build.sh` 一套脚本出两种包，由 `kb_resolve_scheme` 决定：`KEYBRIDGE_SCHEME=rootless`（包内落 `/var/jb` 前缀，`APELIN_ARCHITECTURE=iphoneos-arm64`，出 fat arm64+arm64e）与 `roothide`（前缀为空，装机时由 vroot 改写）。不给 `KEYBRIDGE_SCHEME` 时按 Apelin 传下的 `APELIN_PREFIX` 推断：空即 roothide，非空即 rootless。本机 Apelin 构建口径不变。
+- 编译最低系统统一 `-mios-version-min=${KEYBRIDGE_MIN_IOS:-15.0}`，control 只声明 `firmware (>= $min_ios)` 下限；旧版写死 16.3 与 `<< 17.0` 会让 iOS 15 装完直接跑不起来（守护进程被 dyld 拒，面板只能显示「等待后台接收任务」）。三处版本同步：`build.sh` 默认值、`ImportPreferences/Resources/Info.plist`（`CFBundleShortVersionString` 与 `MinimumOSVersion`）。
+- GitHub Actions（`.github/workflows/build.yml`）只出 rootless 包：`workflow_dispatch` 触发，theos 仅用于取 ldid，`brew install dpkg` 供 `dpkg-deb`；版本优先用输入值，否则读 `build.sh`（`KEYBRIDGE_PRINT_VARS_ONLY=1` 只解析不编译）。产物名 `KeyBridge-<版本>-rootless.deb`。roothide 不在 CI 上打包：包内路径与 jbroot 视图绑定，runner 上造不出来也没有真机可验。
+- LaunchDaemon plist 由 `Injector/postinst` 现场生成，包里不再带模板：安装环节可能把落盘 plist 转成 binary1，对它做 `sed` 会整份改坏且 launchd 只报 109、不留日志。postinst 与 prerm 共用同一套前缀探测（rootless `/var/jb`、roothide 空、rootful 空），rootless 的 `ProgramArguments` 用 `sh -c 'sleep 20; exec …'` 越过开机 uncrush 窗口（直接 exec 有「running 却从未进 main、KeepAlive 不再重拉」的先例），roothide 保持原来的直接 exec。安装结论写进 `<词库目录>/install.log`，卸载/排查先看这份。
+- 守护进程不再只认一处偏好文件：`var/mobile/Library/Preferences/com.wm0104.keybridge.plist` 的 bootstrap 根、`/var/jb`、真实根、`/rootfs` 候选都读，取 `requestStamp` 最新的那份，并把选中路径写进 `KeyBridgeInjector.json`（`prefsPath`、`keyboardDir`、`injectTool`、`injectDylib`）。opainject 与探针 dylib 同样按候选找，不再假定一定在 bootstrap 根下。`import-task.json` 与 `last-import.json` 写失败会记 os_log，避免面板只剩一句等待提示。
+- iOS 15 / rootless 仍待真机验证：守护进程能否被 launchd 拉起并写心跳、opainject 在该越狱里叫什么在哪、探针 hook 在 15 的 `TIKeyboardInputManagerPinyin` 上是否命中、从设置页 ZIP 选择到索引生成的整条导入链，都不能凭源码写成已通过。
+
 ## 查询性能验证
 
 - 日常 debug/release 构建均不自动运行查询基准；仅显式设置 `KEYBRIDGE_LOOKUP_BENCHMARK=1` 的 debug 构建启用 `KB_LOOKUP_BENCHMARK`，在 kbd 内复用 `Tests/LookupBench.m` 做边界回归和同索引新旧查询对照。测试使用独立 mmap/cache，不与按键路径共享映射；release 拒绝开启基准。
