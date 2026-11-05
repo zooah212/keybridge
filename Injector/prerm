@@ -1,0 +1,25 @@
+#!/bin/sh
+# 卸载时先停掉注入守护进程，再清掉我们生成的词库与索引；苹果自己的词库与学习词库一概不碰。
+set -e
+
+# 升级不卸载、不清理；只有明确卸载才删除插件数据。
+case "${1:-}" in
+    remove) ;;
+    *) exit 0 ;;
+esac
+
+PLIST=/Library/LaunchDaemons/com.wm0104.keybridge.injector.plist
+launchctl unload "${PLIST:?}" >/dev/null 2>&1 || true
+rm -f "${PLIST:?}"
+
+# roothide 下真实根是 /rootfs，bootstrap 脚本里的 /var/mobile 指的是 jbroot 自己的 var；
+# 两处都清，避免只删到空目录。
+for ROOT in /rootfs /var/jb ""; do
+    KEYBOARD="$ROOT/var/mobile/Library/Keyboard"
+    [ -d "${KEYBOARD:?}" ] || continue
+    rm -rf "${KEYBOARD:?}/KeyBridge"
+    rm -f "${KEYBOARD:?}/KeyBridgeProbe-kbd.json" "${KEYBOARD:?}/KeyBridgeProbe-SpringBoard.json" \
+          "${KEYBOARD:?}/KeyBridgeInjector.json"
+done
+
+exit 0

@@ -1,0 +1,12 @@
+--- !tapi-tbd
+# Link stub for the private Preferences framework. Only the superclass this
+# project subclasses is declared; the real framework supplies it at runtime.
+tbd-version:     4
+targets:         [ arm64-ios, arm64e-ios ]
+install-name:    '/System/Library/PrivateFrameworks/Preferences.framework/Preferences'
+current-version: 1
+compatibility-version: 1
+exports:
+  - targets:         [ arm64-ios, arm64e-ios ]
+    objc-classes:    [ PSViewController ]
+...

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "projectID": "e50af224-0267-4c27-ac2f-37d832e4adf0",
+  "kind": "workspace",
+  "buildSystem": "external",
+  "displayName": "KeyBridge",
+  "autoName": false,
+  "external": {
+    "script": "Apelin/build.sh",
+    "interpreter": "sh",
+    "arguments": []
+  }
+}

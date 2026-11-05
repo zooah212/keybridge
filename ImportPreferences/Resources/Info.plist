@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.wm0104.keybridge.preferences</string>
+<key>CFBundleName</key><string>KeyBridgePreferences</string>
+<key>CFBundleDisplayName</key><string>词库桥接</string>
+<key>CFBundleExecutable</key><string>KeyBridgePreferences</string>
+<key>CFBundlePackageType</key><string>BNDL</string>
+<key>CFBundleShortVersionString</key><string>0.0.1</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>NSPrincipalClass</key><string>KBImportController</string>
+<key>MinimumOSVersion</key><string>16.3</string>
+<key>LSApplicationQueriesSchemes</key><array><string>filza</string><string>filzaedit</string></array>
+<key>LSRequiresIPhoneOS</key><true/>
+</dict></plist>

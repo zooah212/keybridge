@@ -1,0 +1,29 @@
+#!/bin/sh
+# 把守护进程的 plist 写成当前 bootstrap 的真实路径，然后加载它。
+set -e
+
+JB=""
+if command -v jbroot >/dev/null 2>&1; then
+    JB=$(jbroot 2>/dev/null || true)
+fi
+JB=${JB%/}
+[ -n "$JB" ] || JB=/var/jb
+
+TEMPLATE=/usr/share/keybridge/injector.plist.in
+PLIST=/Library/LaunchDaemons/com.wm0104.keybridge.injector.plist
+
+if [ -f "$TEMPLATE" ]; then
+    mkdir -p /Library/LaunchDaemons
+    sed "s|@JBROOT@|$JB|g" "$TEMPLATE" > "$PLIST"
+    chmod 0644 "$PLIST"
+    launchctl unload "$JB$PLIST" >/dev/null 2>&1 || true
+    launchctl load -w "$JB$PLIST" >/dev/null 2>&1 || true
+fi
+
+# 设置面板以 mobile 运行，需要一个它能写的目录来放导入的词表。
+KEYBOARD="$JB/private/var/mobile/Library/Keyboard/KeyBridge"
+mkdir -p "$KEYBOARD/incoming"
+chown -R mobile:mobile "$KEYBOARD/incoming" 2>/dev/null || true
+chmod 0777 "$KEYBOARD/incoming" 2>/dev/null || true
+
+exit 0
