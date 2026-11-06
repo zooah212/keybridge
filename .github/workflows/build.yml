@@ -121,6 +121,7 @@ jobs:
           for path in \
             var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/KeyBridgePreferences \
             var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/Info.plist \
+            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/icon.png \
             var/jb/Library/PreferenceLoader/Preferences/KeyBridge.plist \
             var/jb/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.dylib \
             var/jb/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.plist \

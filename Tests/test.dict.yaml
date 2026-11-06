@@ -1,0 +1,914 @@
+# 测试词库；含3条故意不对应读音的测试专用编码，词频仅用于测试排序。
+---
+name: test
+version: "2026.11.05"
+sort: by_weight
+columns:
+  - text
+  - code
+  - weight
+...
+爱	ai	10000
+安	an	10000
+按钮	an niu	10000
+安全	an quan	10000
+安装	an zhuang	10000
+吧	ba	10000
+爸爸	ba ba	10000
+白	bai	10000
+百	bai	10000
+白菜	bai cai	10000
+半	ban	10000
+版本	ban ben	10000
+版本更新	ban ben geng xin	10000
+帮	bang	10000
+帮助	bang zhu	10000
+包	bao	10000
+保持联系	bao chi lian xi	10000
+保存	bao cun	10000
+保存成功	bao cun cheng gong	10000
+包子	bao zi	10000
+北	bei	10000
+备份	bei fen	10000
+北京	bei jing	10000
+备忘录	bei wang lu	10000
+本	ben	10000
+本地	ben di	10000
+本地测试	ben di ce shi	10000
+本地词库	ben di ci ku	10000
+本地候选	ben di hou xuan	10000
+本地候选显示正常	ben di hou xuan xian shi zheng chang	10000
+本地输入	ben di shu ru	10000
+本地文件	ben di wen jian	10000
+比	bi	10000
+编码	bian ma	10000
+编译	bian yi	10000
+标点	biao dian	10000
+标题	biao ti	10000
+别	bie	10000
+别人	bie ren	10000
+并	bing	10000
+必须	bi xu	10000
+不	bu	10000
+不错	bu cuo	10000
+不好	bu hao	10000
+不慌不忙	bu huang bu mang	10000
+不客气	bu ke qi	10000
+不可思议	bu ke si yi	10000
+不能	bu neng	10000
+不是	bu shi	10000
+不言而喻	bu yan er yu	10000
+不要	bu yao	10000
+不用	bu yong	10000
+不约而同	bu yue er tong	10000
+不知不觉	bu zhi bu jue	10000
+步骤	bu zhou	10000
+才	cai	10000
+菜	cai	10000
+菜单	cai dan	10000
+仓库	cang ku	10000
+参加	can jia	10000
+草	cao	10000
+操作	cao zuo	10000
+参差	cen ci	10000
+测试	ce shi	10000
+测试成功	ce shi cheng gong	10000
+茶	cha	10000
+差别	cha bie	10000
+拆分	chai fen	10000
+插件	cha jian	10000
+长	chang	10000
+长按	chang an	10000
+长处	chang chu	10000
+长度	chang du	10000
+长句	chang ju	10000
+长期	chang qi	10000
+长沙	chang sha	10000
+超市	chao shi	10000
+查询	cha xun	10000
+车	che	10000
+成都	cheng du	10000
+成功	cheng gong	10000
+程序	cheng xu	10000
+程序员	cheng xu yuan	10000
+成语	cheng yu	10000
+橙子	cheng zi	10000
+撤销	che xiao	10000
+车站	che zhan	10000
+吃	chi	10000
+吃饭	chi fan	10000
+持之以恒	chi zhi yi heng	10000
+重复	chong fu	10000
+重来	chong lai	10000
+重启	chong qi	10000
+重庆	chong qing	10000
+重新	chong xin	10000
+重新输入	chong xin shu ru	10000
+重做	chong zuo	10000
+出	chu	10000
+出差	chu chai	10000
+出发	chu fa	10000
+出门	chu men	10000
+触摸	chu mo	10000
+春暖花开	chun nuan hua kai	10000
+出租车	chu zu che	10000
+次	ci	10000
+词	ci	10000
+词库	ci ku	10000
+词库导入	ci ku dao ru	10000
+词库桥接测试完成	ci ku qiao jie ce shi wan cheng	10000
+词频	ci pin	10000
+词语	ci yu	10000
+从	cong	10000
+错	cuo	10000
+错误	cuo wu	10000
+大	da	10000
+打	da	10000
+打包	da bao	10000
+大大小小	da da xiao xiao	10000
+带	dai	10000
+代码	dai ma	10000
+大家	da jia	10000
+打开	da kai	10000
+但	dan	10000
+当	dang	10000
+蛋糕	dan gao	10000
+当然	dang ran	10000
+但是	dan shi	10000
+单字	dan zi	10000
+到	dao	10000
+导出	dao chu	10000
+到达	dao da	10000
+导航	dao hang	10000
+到家	dao jia	10000
+导入	dao ru	10000
+答应	da ying	10000
+得	de	10000
+的	de	10000
+得到	de dao	10000
+等	deng	10000
+登录	deng lu	10000
+等我一下	deng wo yi xia	10000
+等一下	deng yi xia	10000
+低	di	10000
+地	di	10000
+点	dian	10000
+电	dian	10000
+电动车	dian dong che	10000
+点击	dian ji	10000
+电脑	dian nao	10000
+弟弟	di di	10000
+地铁	di tie	10000
+地图	di tu	10000
+地址	di zhi	10000
+东	dong	10000
+动	dong	10000
+都	dou	10000
+豆腐	dou fu	10000
+都是	dou shi	10000
+读	du	10000
+短句	duan ju	10000
+对	dui	10000
+对不起	dui bu qi	10000
+多	duo	10000
+多多少少	duo duo shao shao	10000
+多少	duo shao	10000
+多音字	duo yin zi	10000
+二	er	10000
+而且	er qie	10000
+二十个候选测试	er shi ge hou xuan ce shi	10000
+二维码	er wei ma	10000
+发	fa	10000
+饭店	fan dian	10000
+放	fang	10000
+方	fang	10000
+方便	fang bian	10000
+方向	fang xiang	10000
+放学	fang xue	10000
+返回	fan hui	10000
+反馈	fan kui	10000
+繁体	fan ti	10000
+发送	fa song	10000
+发现	fa xian	10000
+非	fei	10000
+非常	fei chang	10000
+飞机	fei ji	10000
+分	fen	10000
+风	feng	10000
+丰富多彩	feng fu duo cai	10000
+风和日丽	feng he ri li	10000
+分支	fen zhi	10000
+分钟	fen zhong	10000
+分组	fen zu	10000
+符号	fu hao	10000
+附近	fu jin	10000
+服务器	fu wu qi	10000
+复杂	fu za	10000
+复制	fu zhi	10000
+干干净净	gan gan jing jing	10000
+刚才	gang cai	10000
+感觉	gan jue	10000
+高	gao	10000
+高铁	gao tie	10000
+哥哥	ge ge	10000
+给	gei	10000
+跟	gen	10000
+更	geng	10000
+更新	geng xin	10000
+各种各样	ge zhong ge yang	10000
+公	gong	10000
+共	gong	10000
+工	gong	10000
+公交	gong jiao	10000
+功能	gong neng	10000
+公司	gong si	10000
+公园	gong yuan	10000
+工作	gong zuo	10000
+工作顺利	gong zuo shun li	10000
+狗	gou	10000
+关	guan	10000
+关闭	guan bi	10000
+光标	guang biao	10000
+广州	guang zhou	10000
+归还	gui huan	10000
+国	guo	10000
+过	guo	10000
+过滤	guo lv	10000
+海	hai	10000
+还	hai	10000
+海阔天空	hai kuo tian kong	10000
+还是	hai shi	10000
+还是不行	hai shi bu xing	10000
+还有	hai you	10000
+孩子	hai zi	10000
+行	hang	10000
+行业	hang ye	10000
+行长	hang zhang	10000
+杭州	hang zhou	10000
+汉字	han zi	10000
+好	hao	10000
+好的	hao de	10000
+合并	he bing	10000
+很	hen	10000
+喝水	he shui	10000
+红	hong	10000
+红绿灯	hong lv deng	10000
+红猫正在打字	hong mao zheng zai da zi	10000
+后	hou	10000
+后面	hou mian	10000
+后天	hou tian	10000
+候选	hou xuan	10000
+候选词	hou xuan ci	10000
+花	hua	10000
+滑动	hua dong	10000
+缓存	huan cun	10000
+恍然大悟	huang ran da wu	10000
+还钱	huan qian	10000
+欢声笑语	huan sheng xiao yu	10000
+欢天喜地	huan tian xi di	10000
+会	hui	10000
+回	hui	10000
+回车	hui che	10000
+恢复	hui fu	10000
+回家	hui jia	10000
+回头联系	hui tou lian xi	10000
+火	huo	10000
+火车	huo che	10000
+或者	huo zhe	10000
+护士	hu shi	10000
+假	jia	10000
+家	jia	10000
+见	jian	10000
+间	jian	10000
+简单	jian dan	10000
+将	jiang	10000
+键盘	jian pan	10000
+简拼	jian pin	10000
+剪切	jian qie	10000
+减少	jian shao	10000
+简体	jian ti	10000
+简体中文	jian ti zhong wen	10000
+叫	jiao	10000
+教程	jiao cheng	10000
+脚踏实地	jiao ta shi di	10000
+饺子	jiao zi	10000
+家人	jia ren	10000
+机场	ji chang	10000
+鸡蛋	ji dan	10000
+记得	ji de	10000
+接	jie	10000
+结果	jie guo	10000
+姐姐	jie jie	10000
+解决	jie jue	10000
+界面	jie mian	10000
+接收	jie shou	10000
+结束	jie shu	10000
+解压	jie ya	10000
+记录	ji lu	10000
+今	jin	10000
+近	jin	10000
+进	jin	10000
+井井有条	jing jing you tiao	10000
+今年	jin nian	10000
+今天	jin tian	10000
+今天的天气很好	jin tian de tian qi hen hao	10000
+今天辛苦了	jin tian xin ku le	10000
+计算机	ji suan ji	10000
+就	jiu	10000
+旧	jiu	10000
+九宫格	jiu gong ge	10000
+就是	jiu shi	10000
+继续	ji xu	10000
+觉	jue	10000
+觉得	jue de	10000
+觉醒	jue xing	10000
+聚精会神	ju jing hui shen	10000
+举一反三	ju yi fan san	10000
+卡	ka	10000
+咖啡	ka fei	10000
+开	kai	10000
+开关	kai guan	10000
+开开心心	kai kai xin xin	10000
+开始	kai shi	10000
+开源项目	kai yuan xiang mu	10000
+看	kan	10000
+看一下	kan yi xia	10000
+看着	kan zhe	10000
+可	ke	10000
+客户端	ke hu duan	10000
+可能	ke neng	10000
+客人	ke ren	10000
+可以	ke yi	10000
+空格	kong ge	10000
+空气	kong qi	10000
+口	kou	10000
+块	kuai	10000
+快	kuai	10000
+快乐	kuai le	10000
+拉	la	10000
+来	lai	10000
+来来往往	lai lai wang wang	10000
+蓝	lan	10000
+蓝猫在测试词库	lan mao zai ce shi ci ku	10000
+老	lao	10000
+老板	lao ban	10000
+老师	lao shi	10000
+拉取	la qu	10000
+乐	le	10000
+了	le	10000
+乐观	le guan	10000
+冷	leng	10000
+里	li	10000
+两	liang	10000
+链接	lian jie	10000
+了结	liao jie	10000
+了解	liao jie	10000
+列表	lie biao	10000
+理解	li jie	10000
+里面	li mian	10000
+凌晨	ling chen	10000
+浏览器	liu lan qi	10000
+路	lu	10000
+路线	lu xian	10000
+绿	lv	10000
+绿茶	lv cha	10000
+旅行	lv xing	10000
+旅游	lv you	10000
+吗	ma	10000
+麻烦	ma fan	10000
+麻烦你了	ma fan ni le	10000
+买	mai	10000
+卖	mai	10000
+买菜	mai cai	10000
+妈妈	ma ma	10000
+慢	man	10000
+猫	mao	10000
+马上	ma shang	10000
+每	mei	10000
+没	mei	10000
+没关系	mei guan xi	10000
+美好生活	mei hao sheng huo	10000
+妹妹	mei mei	10000
+没什么关系	mei shen me guan xi	10000
+每天	mei tian	10000
+没有	mei you	10000
+没有问题	mei you wen ti	10000
+门	men	10000
+米	mi	10000
+面	mian	10000
+面包	mian bao	10000
+面条	mian tiao	10000
+米饭	mi fan	10000
+密码	mi ma	10000
+名	ming	10000
+明	ming	10000
+明白	ming bai	10000
+明明白白	ming ming bai bai	10000
+明年	ming nian	10000
+明天	ming tian	10000
+明天见面	ming tian jian mian	10000
+明天再联系	ming tian zai lian xi	10000
+明天再说	ming tian zai shuo	10000
+木	mu	10000
+哪	na	10000
+那	na	10000
+哪个	na ge	10000
+那个	na ge	10000
+奶茶	nai cha	10000
+哪里	na li	10000
+那里	na li	10000
+南	nan	10000
+南京	nan jing	10000
+那些	na xie	10000
+那样	na yang	10000
+呢	ne	10000
+内容	nei rong	10000
+能	neng	10000
+你	ni	10000
+倪	ni	10000
+匿	ni	10000
+妮	ni	10000
+尼	ni	10000
+拟	ni	10000
+泥	ni	10000
+溺	ni	10000
+腻	ni	10000
+逆	ni	10000
+年	nian	10000
+鸟语花香	niao yu hua xiang	10000
+你吃饭了吗	ni chi fan le ma	10000
+你到家了吗	ni dao jia le ma	10000
+你好	ni hao	10000
+你们	ni men	10000
+您	nin	10000
+牛	niu	10000
+牛奶	niu nai	10000
+你现在在哪里	ni xian zai zai na li	10000
+女	nv	10000
+女儿	nv er	10000
+女孩	nv hai	10000
+女人	nv ren	10000
+女士	nv shi	10000
+排除	pai chu	10000
+排序	pai xu	10000
+旁	pang	10000
+旁边	pang bian	10000
+跑	pao	10000
+跑得快	pao de kuai	10000
+朋友	peng you	10000
+朋友圈	peng you quan	10000
+片	pian	10000
+便宜	pian yi	10000
+平安喜乐	ping an xi le	10000
+苹果	ping guo	10000
+屏幕	ping mu	10000
+平平安安	ping ping an an	10000
+拼音	pin yin	10000
+拼音输入	pin yin shu ru	10000
+匹配	pi pei	10000
+葡萄	pu tao	10000
+气	qi	10000
+起	qi	10000
+恰到好处	qia dao hao chu	10000
+前	qian	10000
+钱	qian	10000
+前面	qian mian	10000
+前缀	qian zhui	10000
+桥	qiao	10000
+汽车	qi che	10000
+起床	qi chuang	10000
+请	qing	10000
+清楚	qing chu	10000
+请发给我	qing fa gei wo	10000
+清清楚楚	qing qing chu chu	10000
+青山绿水	qing shan lv shui	10000
+请稍等一下	qing shao deng yi xia	10000
+晴天	qing tian	10000
+请再说一遍	qing zai shuo yi bian	10000
+其实	qi shi	10000
+启用	qi yong	10000
+去	qu	10000
+全力以赴	quan li yi fu	10000
+全拼	quan pin	10000
+权限	quan xian	10000
+确定	que ding	10000
+确认	que ren	10000
+去年	qu nian	10000
+取消	qu xiao	10000
+让	rang	10000
+然后	ran hou	10000
+热	re	10000
+人	ren	10000
+人工智能	ren gong zhi neng	10000
+认认真真	ren ren zhen zhen	10000
+人参	ren shen	10000
+认为	ren wei	10000
+认真	ren zhen	10000
+日	ri	10000
+日志	ri zhi	10000
+入	ru	10000
+如	ru	10000
+软件	ruan jian	10000
+如果	ru guo	10000
+三	san	10000
+色	se	10000
+山	shan	10000
+删除	shan chu	10000
+删除词条	shan chu ci tiao	10000
+上	shang	10000
+上班	shang ban	10000
+上传	shang chuan	10000
+商店	shang dian	10000
+上海	shang hai	10000
+上午	shang wu	10000
+上学	shang xue	10000
+山清水秀	shan qing shui xiu	10000
+少	shao	10000
+稍等一下	shao deng yi xia	10000
+谁	shei	10000
+升级	sheng ji	10000
+生日快乐	sheng ri kuai le	10000
+声音	sheng yin	10000
+什么	shen me	10000
+身体健康	shen ti jian kang	10000
+深圳	shen zhen	10000
+设置	she zhi	10000
+是	shi	30000
+时	shi	29900
+事	shi	29800
+十	shi	29700
+使	shi	29600
+市	shi	29500
+式	shi	29400
+识	shi	29300
+世	shi	29200
+师	shi	29100
+实	shi	29000
+史	shi	28900
+石	shi	28800
+试	shi	28700
+食	shi	28600
+始	shi	28500
+示	shi	28400
+士	shi	28300
+诗	shi	28200
+室	shi	28100
+视	shi	28000
+适	shi	27900
+失	shi	27800
+释	shi	27700
+饰	shi	27600
+拾	shi	27500
+势	shi	27400
+湿	shi	27300
+狮	shi	27200
+尸	shi	27100
+驶	shi	27000
+誓	shi	26900
+逝	shi	26800
+侍	shi	26700
+嗜	shi	26600
+蚀	shi	26500
+匙	shi	26400
+柿	shi	26300
+失败	shi bai	10000
+时候	shi hou	10000
+时间	shi jian	10000
+视频	shi pin	10000
+实事求是	shi shi qiu shi	10000
+十字路口	shi zi lu kou	10000
+受	shou	10000
+手	shou	10000
+收到消息了	shou dao xiao xi le	10000
+手动刷新	shou dong shua xin	10000
+手机	shou ji	10000
+书	shu	10000
+叔	shu	10000
+属	shu	10000
+数	shu	10000
+暑	shu	10000
+曙	shu	10000
+术	shu	10000
+束	shu	10000
+树	shu	10000
+梳	shu	10000
+殊	shu	10000
+淑	shu	10000
+熟	shu	10000
+疏	shu	10000
+署	shu	10000
+舒	shu	10000
+蔬	shu	10000
+输	shu	10000
+述	shu	10000
+鼠	shu	10000
+刷新	shua xin	10000
+蔬菜	shu cai	10000
+水	shui	10000
+水果	shui guo	10000
+睡觉	shui jiao	10000
+睡着	shui zhao	10000
+数据库	shu ju ku	10000
+数量	shu liang	10000
+数目	shu mu	10000
+熟能生巧	shu neng sheng qiao	10000
+顺其自然	shun qi zi ran	10000
+顺顺利利	shun shun li li	10000
+淑女	shu nv	10000
+说	shuo	10000
+说明	shuo ming	10000
+输入	shu ru	10000
+输入法	shu ru fa	10000
+数数	shu shu	10000
+数学	shu xue	10000
+数字	shu zi	10000
+四	si	10000
+司机	si ji	10000
+送	song	10000
+搜索	sou suo	10000
+随机应变	sui ji ying bian	10000
+所以	suo yi	10000
+索引	suo yin	10000
+他	ta	10000
+她	ta	10000
+它	ta	10000
+太	tai	10000
+他们	ta men	10000
+她们	ta men	10000
+特别	te bie	10000
+天	tian	10000
+天气	tian qi	10000
+提交	ti jiao	10000
+听	ting	10000
+停用	ting yong	10000
+停止	ting zhi	10000
+同事	tong shi	10000
+同学	tong xue	10000
+头	tou	10000
+土豆	tu dou	10000
+退出	tui chu	10000
+退格	tui ge	10000
+推送	tui song	10000
+图片	tu pian	10000
+外	wai	10000
+外面	wai mian	10000
+晚	wan	10000
+玩	wan	10000
+完成	wan cheng	10000
+晚点再说	wan dian zai shuo	10000
+晚饭	wan fan	10000
+忘记	wang ji	10000
+网络	wang luo	10000
+网页	wang ye	10000
+晚上	wan shang	10000
+万事如意	wan shi ru yi	10000
+为	wei	10000
+为什么	wei shen me	10000
+位置	wei zhi	10000
+问	wen	10000
+文本	wen ben	10000
+温度	wen du	10000
+文件	wen jian	10000
+文件管理	wen jian guan li	10000
+文件夹	wen jian jia	10000
+文件已经收到	wen jian yi jing shou dao	10000
+问题	wen ti	10000
+我	wo	10000
+我不太清楚	wo bu tai qing chu	10000
+我重新试试	wo chong xin shi shi	10000
+我马上就到了	wo ma shang jiu dao le	10000
+我们	wo men	10000
+我们下次再见	wo men xia ci zai jian	10000
+我们一起吃饭吧	wo men yi qi chi fan ba	10000
+我明白了	wo ming bai le	10000
+我试一下	wo shi yi xia	10000
+我先去忙了	wo xian qu mang le	10000
+我现在出发	wo xian zai chu fa	10000
+我已经到了	wo yi jing dao le	10000
+我再看看	wo zai kan kan	10000
+我在路上	wo zai lu shang	10000
+我正在测试词库	wo zheng zai ce shi ci ku	10000
+我知道了	wo zhi dao le	10000
+午饭	wu fan	10000
+武汉	wu han	10000
+五颜六色	wu yan liu se	10000
+西	xi	10000
+下	xia	10000
+下班	xia ban	10000
+下次再见	xia ci zai jian	10000
+先	xian	10000
+现	xian	10000
+西安	xi an	10000
+向	xiang	10000
+想	xiang	10000
+相差	xiang cha	10000
+香蕉	xiang jiao	10000
+项目	xiang mu	10000
+先生	xian sheng	10000
+现在	xian zai	10000
+现在可以了	xian zai ke yi le	10000
+小	xiao	10000
+笑	xiao	10000
+小时	xiao shi	10000
+小心翼翼	xiao xin yi yi	10000
+下午	xia wu	10000
+下雪	xia xue	10000
+下雨	xia yu	10000
+下载	xia zai	10000
+些	xie	10000
+写	xie	10000
+谢谢	xie xie	10000
+谢谢你的帮助	xie xie ni de bang zhu	10000
+卸载	xie zai	10000
+西瓜	xi gua	10000
+喜欢	xi huan	10000
+心	xin	10000
+新	xin	10000
+行	xing	10000
+行动	xing dong	10000
+兴高采烈	xing gao cai lie	10000
+星期	xing qi	10000
+行为	xing wei	10000
+行走	xing zou	10000
+辛苦了	xin ku le	10000
+心满意足	xin man yi zu	10000
+新年快乐	xin nian kuai le	10000
+心想事成	xin xiang shi cheng	10000
+系统	xi tong	10000
+系统设置	xi tong she zhi	10000
+修复	xiu fu	10000
+修改	xiu gai	10000
+休息	xiu xi	10000
+希望	xi wang	10000
+洗澡	xi zao	10000
+选择	xuan ze	10000
+选中	xuan zhong	10000
+学	xue	10000
+雪	xue	10000
+学生	xue sheng	10000
+学习	xue xi	10000
+学校	xue xiao	10000
+循序渐进	xun xu jian jin	10000
+需要	xu yao	10000
+阳光	yang guang	10000
+验证码	yan zheng ma	10000
+要	yao	10000
+压缩	ya suo	10000
+也	ye	10000
+页面	ye mian	10000
+也是	ye shi	10000
+一	yi	10000
+义	yi	10000
+亦	yi	10000
+亿	yi	10000
+以	yi	10000
+依	yi	10000
+医	yi	10000
+宜	yi	10000
+已	yi	10000
+异	yi	10000
+役	yi	10000
+忆	yi	10000
+意	yi	10000
+易	yi	10000
+椅	yi	10000
+疑	yi	10000
+益	yi	10000
+移	yi	10000
+翼	yi	10000
+艺	yi	10000
+衣	yi	10000
+议	yi	10000
+译	yi	10000
+遗	yi	10000
+异常	yi chang	10000
+一定	yi ding	10000
+一帆风顺	yi fan feng shun	10000
+以后	yi hou	10000
+一会	yi hui	10000
+已经	yi jing	10000
+已经修好了	yi jing xiu hao le	10000
+一举两得	yi ju liang de	10000
+一路平安	yi lu ping an	10000
+一路顺风	yi lu shun feng	10000
+一目了然	yi mu liao ran	10000
+一模一样	yi mu yi yang	10000
+应当	ying dang	10000
+应该	ying gai	10000
+英文	ying wen	10000
+应用	ying yong	10000
+应用程序	ying yong cheng xu	10000
+银行	yin hang	10000
+隐私	yin si	10000
+因为	yin wei	10000
+音乐	yin yue	10000
+一起	yi qi	10000
+以前	yi qian	10000
+一清二楚	yi qing er chu	10000
+一如既往	yi ru ji wang	10000
+医生	yi sheng	10000
+一心一意	yi xin yi yi	10000
+一言为定	yi yan wei ding	10000
+医院	yi yuan	10000
+一直	yi zhi	10000
+用	yong	10000
+又	you	10000
+右	you	10000
+有	you	10000
+右边	you bian	10000
+优化	you hua	10000
+有始有终	you shi you zhong	10000
+有条不紊	you tiao bu wen	10000
+有问题随时说	you wen ti sui shi shuo	10000
+与	yu	10000
+雨	yu	10000
+元	yuan	10000
+远	yuan	10000
+原因	yuan yin	10000
+乐	yue	10000
+月	yue	10000
+乐队	yue dui	10000
+乐器	yue qi	10000
+云	yun	10000
+运行	yun xing	10000
+再	zai	10000
+在	zai	10000
+再见	zai jian	10000
+暂停	zan ting	10000
+早	zao	10000
+早餐	zao can	10000
+早上	zao shang	10000
+怎	zen	10000
+增加	zeng jia	10000
+怎么	zen me	10000
+怎么样	zen me yang	10000
+长	zhang	10000
+长大	zhang da	10000
+长高	zhang gao	10000
+账号	zhang hao	10000
+粘贴	zhan tie	10000
+着急	zhao ji	10000
+照片	zhao pian	10000
+这	zhe	10000
+这个	zhe ge	10000
+这个功能可以用	zhe ge gong neng ke yi yong	10000
+这个怎么用	zhe ge zen me yong	10000
+这里	zhe li	10000
+真	zhen	10000
+真的	zhen de	10000
+正	zheng	10000
+正常	zheng chang	10000
+正确	zheng que	10000
+正在	zheng zai	10000
+这些	zhe xie	10000
+这样	zhe yang	10000
+只	zhi	10000
+知	zhi	10000
+知道	zhi dao	10000
+知道了	zhi dao le	10000
+中	zhong	10000
+种	zhong	10000
+重点	zhong dian	10000
+中国	zhong guo	10000
+中间	zhong jian	10000
+重量	zhong liang	10000
+中文	zhong wen	10000
+中午	zhong wu	10000
+重心	zhong xin	10000
+重要	zhong yao	10000
+周末	zhou mo	10000
+主	zhu	10000
+住	zhu	10000
+状态	zhuang tai	10000
+转换	zhuan huan	10000
+专心致志	zhuan xin zhi zhi	10000
+祝你生日快乐	zhu ni sheng ri kuai le	10000
+着手	zhuo shou	10000
+注销	zhu xiao	10000
+注意安全	zhu yi an quan	10000
+字	zi	10000
+自	zi	10000
+自定义	zi ding yi	10000
+自定义词	zi ding yi ci	10000
+自定义词库	zi ding yi ci ku	10000
+字符	zi fu	10000
+自己	zi ji	10000
+字母	zi mu	10000
+自行车	zi xing che	10000
+自言自语	zi yan zi yu	10000
+自由自在	zi you zi zai	10000
+总	zong	10000
+走	zou	10000
+最	zui	10000
+最近	zui jin	10000
+作	zuo	10000
+做	zuo	10000
+左	zuo	10000
+左边	zuo bian	10000
+做饭	zuo fan	10000
+昨天	zuo tian	10000
+
+# 测试专用编码：用于开关前后对比，故意不对应汉字读音。
+桥	dan	900000
+蓝猫	ce shi	900000
+红猫到家	ben di ci ku	900000

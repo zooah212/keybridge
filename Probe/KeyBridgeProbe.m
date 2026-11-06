@@ -7,6 +7,10 @@
 #import <objc/runtime.h>
 #import <os/log.h>
 #import <dispatch/dispatch.h>
+#import "../Injector/KBCustomEntries.h"
+#import "KBCandidateTrace.h"
+#import "KBExclusions.h"
+#import "../ImportPreferences/KBSettingsModel.h"
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -22,7 +26,6 @@
 #endif
 
 #include <dlfcn.h>
-#include <mach-o/dyld.h>
 static os_log_t KBLog;
 static void KBStatusSet(NSString *key, id value);
 
@@ -189,7 +192,6 @@ static void KBStatusBump(NSString *key) {
 }
 
 static volatile int KBHeartbeatTicks;
-static volatile int KBHeartbeatStop;
 static volatile int KBHookFlags;
 static volatile int KBCandidateCalls;
 static volatile int KBFoundCalls;
@@ -201,7 +203,7 @@ static void KBStartHeartbeat(void) {
     dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
     dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), 2 * NSEC_PER_SEC, NSEC_PER_SEC / 2);
     dispatch_source_set_event_handler(timer, ^{
-        if (KBHeartbeatStop || KBHeartbeatTicks >= 300) {
+        if (KBHeartbeatTicks >= 300) {
             dispatch_source_cancel(timer);
             return;
         }
@@ -263,7 +265,7 @@ static NSString *const KBKeyboardDirectory = @"/var/mobile/Library/Keyboard/KeyB
 
 // 自定义词条的两份小索引，优先于词库查询。
 static NSString *KBCustomPath(NSString *fileName) {
-    return [KBKeyboardDirectory stringByAppendingPathComponent:fileName];
+    return KBCustomFilePath(KBKeyboardDirectory, fileName);
 }
 
 // active 文件写当前词库名；切换/改名很少，按 mtime 缓存，别每键读文件。
@@ -298,7 +300,7 @@ static NSString *KBIndexPath(NSString *fileName) {
         return [[[KBKeyboardDirectory stringByAppendingPathComponent:@"libs"]
                  stringByAppendingPathComponent:active] stringByAppendingPathComponent:fileName];
     }
-    return [KBKeyboardDirectory stringByAppendingPathComponent:fileName];
+    return KBCustomFilePath(KBKeyboardDirectory, fileName);
 }
 
 typedef struct {
@@ -364,7 +366,6 @@ static void KBPrepareIndexes(void) {
 
 // 从 offset 开始找到下一行的起点（含），返回行首下标；越界返回 size。
 static size_t KBLineStart(KBIndex *index, size_t offset) {
-    if (offset == 0) return 0;
     if (offset >= index->size) return index->size;
     const char *newline = memchr(index->base + offset, '\n', index->size - offset);
     return newline ? (size_t)(newline - index->base) + 1 : index->size;
@@ -430,7 +431,7 @@ static void KBStartBench(NSString *directory);
 // 排除词：KeyBridge/exclude.txt 与当前词库的 exclude.txt，按 mtime 缓存。
 static NSSet<NSString *> *KBExcludedWords;      // 一律不显示
 static NSSet<NSString *> *KBExcludedInitials;   // 只在简拼输入时不显示（行尾带 @简）
-static NSTimeInterval KBExcludedStamp = -1;
+static NSArray *KBExcludedIdentity;
 
 static NSTimeInterval KBPathModificationTime(NSString *path) {
     NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
@@ -446,34 +447,9 @@ static void KBLoadExcludedWords(void) {
     checkedAt = now;
     NSString *globalPath = [KBKeyboardDirectory stringByAppendingPathComponent:@"exclude.txt"];
     NSString *ownPath = KBIndexPath(@"exclude.txt");
-    NSTimeInterval stamp = MAX(KBPathModificationTime(globalPath), KBPathModificationTime(ownPath));
-    if (stamp == KBExcludedStamp) return;
-    KBExcludedStamp = stamp;
-    NSMutableSet<NSString *> *words = [NSMutableSet set];
-    NSMutableSet<NSString *> *initials = [NSMutableSet set];
-    for (NSString *path in @[globalPath ?: @"", ownPath ?: @""]) {
-        if (!path.length) continue;
-        NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
-        for (NSString *line in [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
-            NSString *word = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-            while (word.length && ([word hasPrefix:@"#"] || [word hasPrefix:@"-"])) {
-                word = [[word substringFromIndex:1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-            }
-            if (!word.length) continue;
-            // 行尾 @简：只在简拼（首字母）输入时隐藏，完整拼音照常显示。
-            if ([word hasSuffix:@"@简"]) {
-                word = [[word substringToIndex:word.length - 2]
-                        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                if (word.length) [initials addObject:word];
-                continue;
-            }
-            [words addObject:word];
-        }
-    }
-    KBExcludedWords = words.count ? [words copy] : nil;
-    KBExcludedInitials = initials.count ? [initials copy] : nil;
+    if (!KBRefreshExclusions(@[globalPath, ownPath], &KBExcludedIdentity, &KBExcludedWords, &KBExcludedInitials)) return;
     os_log(KBLog, "excluded words loaded: %lu (+%lu initials only)",
-           (unsigned long)words.count, (unsigned long)initials.count);
+           (unsigned long)KBExcludedWords.count, (unsigned long)KBExcludedInitials.count);
 }
 
 // 候选数量：KeyBridge/candidate-limit 里写着面板选的值，缺省 5。
@@ -486,9 +462,37 @@ static NSUInteger KBCandidateLimit(void) {
         stamp = modified;
         NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
         NSInteger value = text.integerValue;
-        cached = (value >= 1 && value <= 10) ? (NSUInteger)value : 5;
+        cached = (NSUInteger)KBValidatedCandidateLimit(value);
     }
     return cached;
+}
+
+// Independent of active library selection. Missing settings preserve the old enabled default.
+static BOOL KBLocalCandidatesEnabled(void) {
+    static NSObject *lock;
+    static dispatch_once_t once;
+    static BOOL cached = YES, hasPrevious;
+    static struct stat previous;
+    dispatch_once(&once, ^{ lock = [NSObject new]; });
+    @synchronized (lock) {
+        NSString *path = [KBKeyboardDirectory stringByAppendingPathComponent:@"local-enabled"];
+        struct stat info;
+        if (stat(path.fileSystemRepresentation, &info) != 0) {
+            hasPrevious = NO;
+            return cached = YES;
+        }
+        if (!hasPrevious || info.st_ino != previous.st_ino || info.st_size != previous.st_size ||
+            info.st_mtimespec.tv_sec != previous.st_mtimespec.tv_sec ||
+            info.st_mtimespec.tv_nsec != previous.st_mtimespec.tv_nsec) {
+            NSString *text = info.st_size > 0 && info.st_size <= 8
+                ? [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL] : nil;
+            text = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            cached = ![text isEqualToString:@"0"];
+            previous = info;
+            hasPrevious = YES;
+        }
+        return cached;
+    }
 }
 
 // 「只用词库候选」：KeyBridge/lexicon-only 存在就只给词库的词，否则苹果候选接在后面。
@@ -800,7 +804,22 @@ static id KBMakeCandidate(NSString *word, NSString *input) {
         return nil;
     }
     id (*make)(id, SEL, NSString *, NSString *) = (id (*)(id, SEL, NSString *, NSString *))objc_msgSend;
-    return make((id)cls, sel, word, input);
+    @try { return make((id)cls, sel, word, input); }
+    @catch (__unused NSException *exception) {
+        os_log_error(KBLog, "candidate factory failed; keeping baseline candidates");
+        return nil;
+    }
+}
+
+static id KBExistingCandidate(NSArray *candidates, NSString *word) {
+    for (id candidate in candidates) {
+        if (![candidate respondsToSelector:@selector(candidate)]) continue;
+        @try {
+            id value = ((id (*)(id, SEL))objc_msgSend)(candidate, @selector(candidate));
+            if ([value isKindOfClass:NSString.class] && [value isEqualToString:word]) return candidate;
+        } @catch (__unused NSException *exception) {}
+    }
+    return nil;
 }
 
 static void KBDiscoveryAppend(const char *format, ...) {
@@ -1009,64 +1028,54 @@ static id KBHookedFromCandidates(id self, SEL _cmd, id candidates, id triggers) 
                     candidates = kept;
                 }
             }
-            KBPrepareIndexes();
             NSUInteger limit = KBCandidateLimit();
-            NSArray<NSString *> *words = nil;
-            const char *digits = KBLastDigits;
-            if (digits[0] && strlen(digits) >= 2) {
-                // 九宫格：用按键累积的数字串，长度跟随已猜出的字母数（处理退格）。
-                NSString *typed = [NSString stringWithUTF8String:digits];
-                if (typed.length > input.length) typed = [typed substringToIndex:input.length];
-                words = KBIndexLookup(typed, limit, &lines);
-            } else {
-                words = KBIndexLookup(input, limit, &lines);
+            NSArray<NSString *> *words = @[];
+            BOOL localEnabled = KBLocalCandidatesEnabled();
+            report[@"localEnabled"] = @(localEnabled);
+            report[@"localObservedAt"] = @(NSDate.date.timeIntervalSince1970);
+            if (localEnabled) {
+                KBPrepareIndexes();
+                const char *digits = KBLastDigits;
+                if (digits[0] && strlen(digits) >= 2) {
+                    // 九宫格：用按键累积的数字串，长度跟随已猜出的字母数（处理退格）。
+                    NSString *typed = [NSString stringWithUTF8String:digits];
+                    if (typed.length > input.length) typed = [typed substringToIndex:input.length];
+                    words = KBIndexLookup(typed, limit, &lines);
+                } else {
+                    words = KBIndexLookup(input, limit, &lines);
+                }
             }
             lookupMs = (double)(KBNowNs() - lookupStart) / 1e6;
             report[@"lastLookup"] = [NSString stringWithFormat:@"%@ -> %lu (26=%d,9=%d)", input,
                                      (unsigned long)words.count, KBIndex26.base != NULL, KBIndex9.base != NULL];
             report[@"lastWords"] = words.count ? [[words subarrayWithRange:
                 NSMakeRange(0, MIN(words.count, (NSUInteger)5))] componentsJoinedByString:@"|"] : @"-";
-            // 由我们决定顺序：我们的词排最前；苹果列表里同名的先摘掉再放到前面，
-            // 保证同一个词只出现一次，其余候选保持苹果原来的顺序跟在后面。
             NSMutableArray *remaining = [(NSArray *)candidates mutableCopy];
             NSMutableArray *front = [NSMutableArray array];
             for (NSString *word in words) {
-                id matched = nil;
-                for (NSUInteger i = 0; i < remaining.count; i++) {
-                    id candidate = remaining[i];
-                    SEL sel = NSSelectorFromString(@"candidate");
-                    if (![candidate respondsToSelector:sel]) continue;
-                    @try {
-                        id value = ((id (*)(id, SEL))objc_msgSend)(candidate, sel);
-                        if ([value isKindOfClass:[NSString class]] && [value isEqualToString:word]) {
-                            matched = candidate;
-                            [remaining removeObjectAtIndex:i];
-                            break;
-                        }
-                    } @catch (__unused NSException *exception) {
-                    }
-                }
-                id candidate = matched ?: KBMakeCandidate(word, input);
+                id candidate = KBExistingCandidate(remaining, word) ?: KBMakeCandidate(word, input);
                 if (candidate) [front addObject:candidate];
             }
+            for (id candidate in front) [remaining removeObjectIdenticalTo:candidate];
             NSUInteger placed = front.count;
             report[@"injectedInput"] = input ?: @"-";
             report[@"injectedCount"] = @(placed);
+            report[@"droppedApple"] = @0;
             if (placed) {
                 if (KBLexiconOnlyEnabled()) {
                     report[@"mode"] = @"lexicon-only";
+                    report[@"droppedApple"] = @(remaining.count);
                 } else {
                     [front addObjectsFromArray:remaining];
                     report[@"mode"] = @"merged";
                 }
-                report[@"droppedApple"] = @(remaining.count);
                 candidates = front;
             } else {
                 report[@"mode"] = @"none";
             }
         }
         double hookMs = (double)(KBNowNs() - hookStart) / 1e6;
-        if ([report[@"injectedInput"] length]) KBPerfRecord(lookupMs, hookMs, lines, input);
+        if (report[@"injectedCount"]) KBPerfRecord(lookupMs, hookMs, lines, input);
         KBStatusMerge(report);
     }
     return ((id (*)(id, SEL, id, id))KBOrigFromCandidates)(self, _cmd, candidates, triggers);
@@ -1121,6 +1130,8 @@ static void KBInstallHooks(void) {
            class_getImageName(cls) ?: "?");
 
     KBDumpCandidateMethods(cls);
+    // The optional trace needs the hook function too; ordinary hooks load it below.
+    if (KBLoadSubstrate()) KBCandidateTraceInstall(KBHookMessage, cls);
 
     KBInstall(cls, "handleKeyboardInput:", "@@:@", (IMP)KBHookedHandleInput, &KBOrigHandleInput);
     KBInstall(cls, "wordSearchEngineDidFindCandidates:forOperation:", "v@:@@", (IMP)KBHookedFound, &KBOrigFound);

@@ -4,10 +4,11 @@
 <key>CFBundleIdentifier</key><string>com.wm0104.keybridge.preferences</string>
 <key>CFBundleName</key><string>KeyBridgePreferences</string>
 <key>CFBundleDisplayName</key><string>词库桥接</string>
+<key>CFBundleIconFile</key><string>icon.png</string>
 <key>CFBundleExecutable</key><string>KeyBridgePreferences</string>
 <key>CFBundlePackageType</key><string>BNDL</string>
-<key>CFBundleShortVersionString</key><string>0.0.2</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>0.0.3</string>
+<key>CFBundleVersion</key><string>2</string>
 <key>NSPrincipalClass</key><string>KBImportController</string>
 <key>MinimumOSVersion</key><string>15.0</string>
 <key>LSApplicationQueriesSchemes</key><array><string>filza</string><string>filzaedit</string></array>

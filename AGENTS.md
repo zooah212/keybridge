@@ -5,6 +5,14 @@
 - 设置页及链接下载须另做真机验证：导入超过 20 秒、离开再返回、网络失败、同名导入失败时旧词库保留。
 - `Injector/prerm` 仅在 `remove` 时清理，升级直接退出；已验证本机这次升级前后词库文件清单、大小、修改时间及 active 均保留。更新更早版本前仍须检查已安装的旧脚本并备份词库。
 
+## 上游同步
+
+- 本仓库是 https://github.com/wm0104/keybridge 的分叉。同步口径：`git fetch --no-tags https://github.com/wm0104/keybridge.git main:refs/remotes/upstream/main` 后 `git merge upstream/main`，只取上游侧功能，本分叉的打包口径（形态派生、`KEYBRIDGE_MIN_IOS` 参数化、`firmware` 只声明下限、plist 由 postinst 现场生成、偏好多候选读取）不得被顺带回退。
+- 2026-11-06 并入 `acd7c94`（设置页分类展开与原生列表过渡、测试词库、sbreload 注销、`KBCandidateTrace`）：四处冲突按上面的口径解——上游也把最低系统写成了 15.0（但是写死），本分叉保留参数化；上游 `Depends` 带 `firmware (<< 17.0)` 上界，本分叉继续只声明下限（iOS 17 能装）；`Section: 键盘增强`、control Description、`CFBundleVersion 2`、面板编译带 `-DAPELIN_BUILD_ID`、`KEYBRIDGE_CANDIDATE_TRACE=1`（仅 debug 的诊断开关）取上游。上游删除了 `AGENTS.md`，本分叉保留这份口径记录。
+- 上游新增的注销/`sbreload` 子系统按 `KBBootstrapRoot()` 拼工具路径（rootless 下得到 `/var/jb`），与本分叉的候选表逻辑不冲突；`KBInject`/偏好读取仍走候选，守护进程状态文件仍写 `prefsPath`、`injectTool`、`injectDylib`。
+- 合并后版本 0.0.3（`build.sh` 默认值与 `Info.plist` 的 `CFBundleShortVersionString` 同步；上游也用过 0.0.2，与本分叉的 0.0.2 不是同一份产物，必须往上抬一位）。
+- 上游自带的 Python 源码守护测试默认按 UTF-8 读文件，本分叉已补 `encoding='utf-8'`（Windows 默认 GBK 会解码失败）；`Tests/test_settings_rows.py` 需要真实 C 编译器，本机没有 clang 时的失败不是代码问题，不能记为上游功能回归通过。上游新增的原生回归（`Tests/run-local.sh`、`LocalTests.m`、`RespringTests.m`、`RespringStaticChecks.sh`）只在设备/macOS 上跑。
+
 ## 打包形态与 CI
 
 - `Apelin/build.sh` 一套脚本出两种包，由 `kb_resolve_scheme` 决定：`KEYBRIDGE_SCHEME=rootless`（包内落 `/var/jb` 前缀，`APELIN_ARCHITECTURE=iphoneos-arm64`，出 fat arm64+arm64e）与 `roothide`（前缀为空，装机时由 vroot 改写）。不给 `KEYBRIDGE_SCHEME` 时按 Apelin 传下的 `APELIN_PREFIX` 推断：空即 roothide，非空即 rootless。本机 Apelin 构建口径不变。

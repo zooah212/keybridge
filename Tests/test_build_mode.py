@@ -7,19 +7,22 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def probe_flags(configuration=None, benchmark=None):
+def probe_flags(configuration=None, benchmark=None, trace=None):
     source = (ROOT / 'Apelin/build.sh').read_text(encoding='utf-8')
     function = source.split('link_probe() {', 1)[1].split('\n}\n', 1)[0]
     script = ('set -eu\nclang() { printf "%s\\n" "$@"; }\n'
               'link_probe() {' + function + '\n}\nlink_probe arm64e /tmp/keybridge-test-objects\n')
     env = os.environ.copy()
-    for key in ('APELIN_CONFIGURATION', 'KEYBRIDGE_LOOKUP_BENCHMARK', 'KEYBRIDGE_MIN_IOS'):
+    for key in ('APELIN_CONFIGURATION', 'KEYBRIDGE_LOOKUP_BENCHMARK',
+                'KEYBRIDGE_CANDIDATE_TRACE', 'KEYBRIDGE_MIN_IOS'):
         env.pop(key, None)
     env.update(SDKROOT='/test/SDK', APELIN_BUILD_ID='test-only')
     if configuration is not None:
         env['APELIN_CONFIGURATION'] = configuration
     if benchmark is not None:
         env['KEYBRIDGE_LOOKUP_BENCHMARK'] = benchmark
+    if trace is not None:
+        env['KEYBRIDGE_CANDIDATE_TRACE'] = trace
     return subprocess.run(['sh', '-c', script], env=env, text=True, encoding='utf-8',
                           errors='replace', capture_output=True)
 
@@ -47,6 +50,40 @@ def fields(result):
 
 
 class BuildModeTests(unittest.TestCase):
+    def test_candidate_trace_stays_opt_in_and_debug_only(self):
+        for configuration, option, expected in (
+            ('debug', None, 0), ('release', None, 0), ('debug', '0', 0),
+            ('debug', '1', 1), ('release', '1', None), ('debug', 'invalid', None),
+        ):
+            with self.subTest(configuration=configuration, option=option):
+                result = probe_flags(configuration, '0', option)
+                if expected is None:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertNotIn('Probe/KeyBridgeProbe.m', result.stdout)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn('-DKB_CANDIDATE_TRACE=' + str(expected), result.stdout.splitlines())
+
+    def test_probe_build_has_no_cloud_client(self):
+        result = probe_flags('debug', '0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = result.stdout.splitlines()
+        self.assertNotIn('Probe/KBCloudPinyin.m', arguments)
+        self.assertFalse(any(arg.startswith('-DKB_CLOUD_DIAGNOSTICS=') for arg in arguments))
+
+    def test_settings_and_probe_share_build_identity(self):
+        source = (ROOT / 'Apelin/build.sh').read_text(encoding='utf-8')
+        function = source.split('compile_objc() {', 1)[1].split('\n}\n', 1)[0]
+        script = ('set -eu\nclang() { printf "%s\\n" "$@"; }\n'
+                  'compile_objc() {' + function + '\n}\ncompile_objc arm64e /tmp/test-objects\n')
+        env = dict(os.environ, SDKROOT='/test/SDK', APELIN_BUILD_ID='test-only')
+        result = subprocess.run(['sh', '-c', script], env=env, text=True, encoding='utf-8',
+                                errors='replace', capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        flag = '-DAPELIN_BUILD_ID="test-only"'
+        self.assertIn(flag, result.stdout.splitlines())
+        self.assertIn(flag, probe_flags().stdout.splitlines())
+
     def check_mode(self, configuration, benchmark, expected):
         result = probe_flags(configuration, benchmark)
         self.assertEqual(result.returncode, 0, result.stderr)

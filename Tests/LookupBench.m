@@ -21,7 +21,7 @@ static void KBCheckFixture(NSString *label, NSString *text, NSString *input, NSA
                            NSUInteger *checks, NSMutableArray *failures) {
     NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
     KBIndex index = {.fd = -1, .base = data.bytes, .size = data.length};
-    for (NSNumber *limit in @[@1, @3, @5, @8, @10]) {
+    for (NSNumber *limit in @[@1, @3, @5, @8, @10, @15, @20]) {
         KBCheckLookup(&index, input, limit.unsignedIntegerValue,
                       limit.unsignedIntegerValue == 5 ? expected : nil, checks, failures, label);
     }
@@ -141,6 +141,24 @@ static NSDictionary *KBRunLookupBench(NSString *directory) {
     KBCheckFixture(@"last-line", @"a\t阿\t10\na\t啊\t9", @"a", @[@"阿", @"啊"], &checks, failures);
     KBCheckFixture(@"empty", @"", @"a", @[], &checks, failures);
     KBCheckFixture(@"missing", @"a\t阿\t10\n", @"zz", @[], &checks, failures);
+    KBCheckFixture(@"long-first-line", @"a\t一个很长的自定义词条\t1000000\nb\t乙\t1000000\n",
+                   @"b", @[@"乙"], &checks, failures);
+    KBCheckFixture(@"long-first-line-no-newline", @"a\t一个很长的自定义词条\t1000000\nb\t乙\t1000000",
+                   @"b", @[@"乙"], &checks, failures);
+    NSArray *ranked = @[@"一", @"二", @"三", @"四", @"五", @"六", @"七", @"八", @"九", @"十",
+                         @"十一", @"十二", @"十三", @"十四", @"十五", @"十六", @"十七", @"十八", @"十九", @"二十", @"二十一"];
+    NSMutableString *largeFixture = [NSMutableString string];
+    for (NSUInteger i = 0; i < ranked.count; i++) {
+        [largeFixture appendFormat:@"a\t%@\t%lu\n", ranked[i], (unsigned long)(1000 - i)];
+    }
+    [largeFixture appendString:@"a\t一\t1\n"];
+    NSData *largeData = [largeFixture dataUsingEncoding:NSUTF8StringEncoding];
+    KBIndex largeIndex = {.fd = -1, .base = largeData.bytes, .size = largeData.length};
+    for (NSNumber *limit in @[@15, @20]) {
+        KBCheckLookup(&largeIndex, @"a", limit.unsignedIntegerValue,
+                      [ranked subarrayWithRange:NSMakeRange(0, limit.unsignedIntegerValue)],
+                      &checks, failures, @"expanded-limit-dedup");
+    }
     NSArray *words = @[@"阿", @"啊", @"安", @"爱", @"昂", @"好", @"你", @"是", @"的", @"我", @"𠀀"];
     NSMutableString *generated = [NSMutableString string];
     for (NSString *key in @[@"a", @"aa", @"aaa", @"aaaaaa", @"ab", @"ac"]) {
@@ -187,7 +205,7 @@ static NSDictionary *KBRunLookupBench(NSString *directory) {
                 }
                 if (![oldWords isEqualToArray:newWords]) same = NO;
             }
-            for (NSNumber *limit in @[@1, @3, @5, @8, @10]) {
+            for (NSNumber *limit in @[@1, @3, @5, @8, @10, @15, @20]) {
                 if (!KBCheckLookup(&snapshot, input, limit.unsignedIntegerValue, nil, &checks, failures, name)) same = NO;
             }
             if (!same && failures.count < 20) {

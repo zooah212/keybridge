@@ -1,7 +1,12 @@
 // KeyBridge 注入守护进程：ellekit 不碰系统守护进程，kbd 要自己注入。
-// 只做一件事：kbd 的 pid 变了就用 opainject 注入探针；不联网，不碰别的进程。
+// 注入 kbd、处理词库导入并镜像设置。
 
 #import <Foundation/Foundation.h>
+#import "KBCustomEntries.h"
+#import "KBRespring.h"
+#import "KBRespringExecutor.h"
+#import "../ImportPreferences/KBSettingsModel.h"
+#include <notify.h>
 #import <os/log.h>
 #include <mach-o/dyld.h>
 #include <spawn.h>
@@ -56,12 +61,11 @@ static NSSet<NSString *> *KBReadExcludedWordsFrom(NSString *path) {
     return words.count ? words : nil;
 }
 
-static NSSet<NSString *> *KBReadExcludedWords(__unused NSString *keyboard, NSString *directory) {
+static NSSet<NSString *> *KBReadExcludedWords(NSString *directory) {
     return KBReadExcludedWordsFrom([directory stringByAppendingPathComponent:@"exclude.txt"]);
 }
 NSUInteger KBExtractDictionaryZip(NSString *zipPath, NSString *destination, void (^log)(NSString *));
 
-NSUInteger KBRebuildCustomIndexes(NSString *keyboard, void (^log)(NSString *));
 static os_log_t KBInjectorLog;
 static NSString *KBStatePath;
 // 这轮真正用到的注入工具与探针路径，只给状态文件做诊断用。
@@ -70,6 +74,15 @@ static NSString *KBInjectDylibPath;
 // 转换/重建放到后台队列：主循环每 2 秒的注入检查不能被一次一分钟的重建拖住。
 static dispatch_queue_t KBCommandQueue;
 static BOOL KBCommandRunning;
+// All respring state is guarded by the same lock as the import queue reservation.
+// Only this process owns the authoritative session/nonce/seen IDs. Public state
+// includes a copy for Settings, but startup never restores it from disk.
+static NSString *KBRespringSession, *KBRespringNonce;
+static id KBRespringLastRequest;
+static NSMutableSet<NSString *> *KBRespringSeenIDs;
+static NSDictionary *KBRespringResult;
+static NSTimeInterval KBRespringIssuedAt, KBRespringIssuedUptime, KBRespringNotBefore;
+static BOOL KBRespringRunning;
 // 主循环只更新心跳；命令队列负责阶段和结果。
 static NSMutableDictionary *KBTask;
 static void KBTaskWrite(NSString *keyboard) {
@@ -89,6 +102,8 @@ static void KBTaskWrite(NSString *keyboard) {
 static void KBTaskBegin(NSString *keyboard, NSMutableDictionary *summary, double stamp) {
     summary[@"requestAt"] = @(stamp);
     @synchronized ([NSProcessInfo class]) {
+        // A request made before/during an import must not execute when it finishes.
+        KBRespringNonce = nil;
         KBTask = [@{@"requestAt": @(stamp), @"phase": @"正在处理…", @"running": @YES} mutableCopy];
         KBTaskWrite(keyboard);
     }
@@ -195,6 +210,103 @@ static void KBWriteHandled(NSString *keyboard, NSDictionary *handled) {
     [data writeToFile:KBHandledPath(keyboard) atomically:YES];
 }
 
+// Runs on the main polling loop, also while an import is running: busy requests
+// are consumed/rejected now, never queued for automatic execution after import.
+static void KBRespringPoll(NSString *keyboard, NSString *root) {
+    NSDictionary *prefs = KBReadPrefs();
+    BOOL pending = KBRespringHasPendingLibraryCommand(prefs, KBReadHandled(keyboard));
+    NSString *sbreload = nil;
+    NSString *toolFailure = KBRespringTool(root, &sbreload);
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    NSTimeInterval uptime = NSProcessInfo.processInfo.systemUptime;
+    NSDictionary *admitted = nil;
+    NSTimeInterval admittedAt = 0, admittedUptime = 0;
+    @synchronized ([NSProcessInfo class]) {
+        if (!KBRespringSession) {
+            KBRespringSession = NSUUID.UUID.UUIDString;
+            KBRespringSeenIDs = [NSMutableSet set];
+            // Do not even enqueue the request left by a previous daemon instance.
+            KBRespringLastRequest = [prefs[KBRespringRequestKey] copy];
+        }
+        id request = prefs[KBRespringRequestKey];
+        if (request && ![request isEqual:KBRespringLastRequest]) {
+            KBRespringLastRequest = [request copy];
+            NSString *identifier = [request isKindOfClass:NSDictionary.class] && KBRespringUUID(request[@"id"])
+                ? request[@"id"] : @"";
+            NSString *failure = KBRespringRequestFailure(request, KBRespringSession, KBRespringNonce,
+                KBRespringIssuedAt, KBRespringIssuedUptime, now, uptime);
+            if (!failure && [KBRespringSeenIDs containsObject:identifier]) failure = @"重复的重载请求已拒绝";
+            if (!failure && KBRespringSeenIDs.count >= 256) failure = @"本次后台会话已达到重载次数上限";
+            if (!failure) [KBRespringSeenIDs addObject:identifier];
+            if (!failure && (KBCommandRunning || pending)) failure = @"正在导入或转换，请完成后重新确认重载";
+            if (!failure && uptime < KBRespringNotBefore) failure = @"刚处理过重载，请稍后重新确认";
+            if (!failure) failure = toolFailure;
+            // Consume before any file write or side effect, including failed requests.
+            KBRespringNonce = nil;
+            if (!failure) {
+                admitted = request;
+                admittedAt = KBRespringIssuedAt;
+                admittedUptime = KBRespringIssuedUptime;
+                KBCommandRunning = YES;
+                KBRespringRunning = YES;
+                KBRespringNotBefore = uptime + 30.0;
+                KBRespringResult = @{@"id": identifier, @"status": @"running",
+                    @"message": @"正在注销…"};
+            } else if (!KBRespringRunning) {
+                KBRespringResult = @{@"id": identifier, @"status": @"rejected", @"message": failure};
+            }
+        }
+        NSString *unavailable = toolFailure;
+        if (KBCommandRunning || pending) unavailable = @"后台正在处理任务，完成后才能重载";
+        else if (uptime < KBRespringNotBefore) unavailable = @"刚处理过重载，请稍后再试；不会自动重试";
+        else if (KBRespringSeenIDs.count >= 256) unavailable = @"本次后台会话已达到重载次数上限";
+        if (unavailable) KBRespringNonce = nil;
+        else if (!KBRespringNonce || now < KBRespringIssuedAt || uptime < KBRespringIssuedUptime ||
+                 now - KBRespringIssuedAt >= KBRespringChallengeLifetime ||
+                 uptime - KBRespringIssuedUptime >= KBRespringChallengeLifetime) {
+            KBRespringNonce = NSUUID.UUID.UUIDString;
+            KBRespringIssuedAt = now;
+            KBRespringIssuedUptime = uptime;
+        }
+        NSDictionary *state = @{@"version": @1, @"session": KBRespringSession,
+            @"nonce": KBRespringNonce ?: @"", @"issuedAt": @(KBRespringIssuedAt),
+            @"expiresAt": @(KBRespringIssuedAt + KBRespringChallengeLifetime),
+            @"updatedAt": @(now), @"ready": @(!unavailable), @"reason": unavailable ?: @"",
+            @"result": KBRespringResult ?: @{}};
+        NSData *data = [NSJSONSerialization dataWithJSONObject:state options:0 error:NULL];
+        BOOL written = [data writeToFile:[keyboard stringByAppendingPathComponent:KBRespringStateFile] atomically:YES];
+        if (admitted && !written) {
+            KBRespringResult = @{@"id": admitted[@"id"], @"status": @"failed",
+                @"message": @"无法保存重载回执，已取消；不会自动重试"};
+            admitted = nil;
+            KBCommandRunning = NO;
+            KBRespringRunning = NO;
+        }
+    }
+    if (!admitted) return;
+    dispatch_async(KBCommandQueue, ^{
+        @autoreleasepool {
+            NSString *failure = KBRespringRequestFailure(admitted, admitted[@"session"], admitted[@"nonce"],
+                admittedAt, admittedUptime, NSDate.date.timeIntervalSince1970, NSProcessInfo.processInfo.systemUptime);
+            // Final check on the same serial queue used by conversions. No import
+            // can start between this check and the fixed operation.
+            if (!failure && KBRespringHasPendingLibraryCommand(KBReadPrefs(), KBReadHandled(keyboard)))
+                failure = @"有新的导入或转换任务，已取消重载，请完成后重新确认";
+            NSString *checkedSbreload = nil;
+            if (!failure) failure = KBRespringTool(root, &checkedSbreload);
+            if (!failure) KBRespringRunTool(checkedSbreload, &failure);
+            NSString *message = failure ?: @"注销命令已返回，请观察桌面；不会自动重试。";
+            @synchronized ([NSProcessInfo class]) {
+                KBRespringResult = @{@"id": admitted[@"id"], @"status": failure ? @"failed" : @"submitted",
+                    @"message": message};
+                KBRespringRunning = NO;
+                KBCommandRunning = NO;
+            }
+            os_log(KBInjectorLog, "respring request finished: %{public}@", message);
+        }
+    });
+}
+
 static void KBEnsureDirectory(NSString *path) {
     [[NSFileManager defaultManager] createDirectoryAtPath:path
                               withIntermediateDirectories:YES attributes:nil error:NULL];
@@ -249,11 +361,8 @@ static NSString *KBReadActiveLibrary(NSString *keyboard) {
 
 static void KBWriteActiveLibrary(NSString *keyboard, NSString *name) {
     NSString *path = KBActivePath(keyboard);
-    if (name.length) {
-        [name writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-    } else {
-        [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
-    }
+    // 空文件表示用户明确不选词库，启动恢复不能将它重新启用。
+    [(name ?: @"") writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
 }
 
 // 用保留的 ZIP 重放一份词库：解压 → 转换 → 写 meta.json。
@@ -291,7 +400,7 @@ static BOOL KBRebuildLibrary(NSString *keyboard, NSString *directory, NSDictiona
     if (!extracted) return NO;
     KBSetConvertOptions([prefs[@"includeTraditional"] boolValue], [prefs[@"includeASCII"] boolValue]);
     KBSetCommonOnly(commonOnly);
-    KBSetExcludedWords(KBReadExcludedWords(keyboard, directory));
+    KBSetExcludedWords(KBReadExcludedWords(directory));
     BOOL ok = KBConvertDictionaries(directory, directory, ^(NSString *message) {
         os_log(KBInjectorLog, "convert: %{public}@", message);
     });
@@ -384,7 +493,7 @@ static NSUInteger KBFilterIndexes(NSString *directory, NSSet<NSString *> *words,
 static void KBScanLibraries(NSString *keyboard, NSDictionary *prefs, NSMutableDictionary *summary);
 
 static BOOL KBInstallZip(NSString *keyboard, NSString *sourcePath, NSString *displayName,
-                         NSDictionary *prefs, NSMutableArray<NSString *> *trace, NSMutableDictionary *summary) {
+                         NSDictionary *prefs, NSMutableArray<NSString *> *trace, NSMutableDictionary *summary, BOOL activate) {
     BOOL commonOnly = prefs[@"commonOnly"] ? [prefs[@"commonOnly"] boolValue] : YES;
     NSFileManager *manager = [NSFileManager defaultManager];
     NSString *libraryName = KBSanitizeLibraryName(displayName.length ? displayName : sourcePath.lastPathComponent);
@@ -429,7 +538,7 @@ static BOOL KBInstallZip(NSString *keyboard, NSString *sourcePath, NSString *dis
            [prefs[@"includeTraditional"] boolValue], [prefs[@"includeASCII"] boolValue]);
     KBSetCommonOnly(commonOnly);
     KBSetConvertOptions([prefs[@"includeTraditional"] boolValue], [prefs[@"includeASCII"] boolValue]);
-    KBSetExcludedWords(KBReadExcludedWords(keyboard, directory));
+    KBSetExcludedWords(KBReadExcludedWords(directory));
     KBTaskPhase(keyboard, @"正在生成索引…");
     BOOL ok = KBConvertDictionaries(directory, directory, ^(NSString *message) {
         os_log(KBInjectorLog, "convert: %{public}@", message);
@@ -453,7 +562,7 @@ static BOOL KBInstallZip(NSString *keyboard, NSString *sourcePath, NSString *dis
         ok = (exists ? renamex_np(directory.fileSystemRepresentation, destination.fileSystemRepresentation, RENAME_SWAP)
                      : rename(directory.fileSystemRepresentation, destination.fileSystemRepresentation)) == 0;
         if (!ok) summary[@"reason"] = @"保存失败，原有词库未改动";
-        if (ok) KBWriteActiveLibrary(keyboard, libraryName);
+        if (ok && activate) KBWriteActiveLibrary(keyboard, libraryName);
     } else {
         summary[@"reason"] = @"生成索引失败，原有词库未改动";
     }
@@ -469,7 +578,7 @@ static BOOL KBInstallZip(NSString *keyboard, NSString *sourcePath, NSString *dis
     return ok;
 }
 
-static void KBConvertIfNeeded(NSString *keyboard, NSString *incoming) {
+static void KBConvertIfNeeded(NSString *keyboard) {
     NSFileManager *manager = [NSFileManager defaultManager];
     NSString *libraries = KBLibrariesDirectory(keyboard);
 
@@ -528,7 +637,7 @@ static void KBConvertIfNeeded(NSString *keyboard, NSString *incoming) {
         if (directory && [manager fileExistsAtPath:indexPath]) {
             [text writeToFile:[directory stringByAppendingPathComponent:@"exclude.txt"]
                    atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-            NSSet<NSString *> *words = KBReadExcludedWords(keyboard, directory);
+            NSSet<NSString *> *words = KBReadExcludedWords(directory);
             BOOL ok = NO;
             NSUInteger excluded = 0;
             BOOL filtered = NO;
@@ -566,13 +675,12 @@ static void KBConvertIfNeeded(NSString *keyboard, NSString *incoming) {
     if (customAt > [handled[@"customAt"] doubleValue]) {
         KBTaskBegin(keyboard, summary, customAt);
         NSString *json = [prefs[@"customJSON"] isKindOfClass:[NSString class]] ? prefs[@"customJSON"] : @"[]";
-        [json writeToFile:[keyboard stringByAppendingPathComponent:@"custom.json"]
-               atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-        NSUInteger count = KBRebuildCustomIndexes(keyboard, ^(NSString *message) {
-            os_log(KBInjectorLog, "custom: %{public}@", message);
-        });
-        summary[@"ok"] = @YES;
-        summary[@"custom"] = @(count);
+        NSUInteger count = 0;
+        NSString *failure = nil;
+        BOOL ok = KBSaveCustomEntries(keyboard, json, &count, &failure);
+        summary[@"ok"] = @(ok);
+        if (ok) summary[@"custom"] = @(count);
+        else summary[@"reason"] = failure ?: @"保存失败，原有词条未改动";
         handled[@"customAt"] = @(customAt);
         KBWriteHandled(keyboard, handled);
         KBWriteSummary(summary, keyboard);
@@ -657,13 +765,13 @@ static void KBConvertIfNeeded(NSString *keyboard, NSString *incoming) {
         handled[@"zipAt"] = @(zipAt);
         KBInstallZip(keyboard, KBRealPath(pendingZip),
                      pendingZipName.length ? pendingZipName : pendingZip.lastPathComponent,
-                     prefs, trace, summary);
+                     prefs, trace, summary, YES);
         KBWriteHandled(keyboard, handled);
         KBWriteSummary(summary, keyboard);
         return;
     }
 
-    // 下拉刷新：扫描用户手动放进 libs/ 的 ZIP 或词典目录。
+    // 扫描按钮：处理用户手动放进 libs/ 的 ZIP 或词典目录。
     double scanAt = [prefs[@"scanAt"] doubleValue];
     if (scanAt > [handled[@"scanAt"] doubleValue]) {
         KBTaskBegin(keyboard, summary, scanAt);
@@ -715,7 +823,7 @@ static void KBConvertIfNeeded(NSString *keyboard, NSString *incoming) {
             dispatch_semaphore_wait(finished, DISPATCH_TIME_FOREVER);
             [session finishTasksAndInvalidate];
             if (downloaded) {
-                KBInstallZip(keyboard, target, fileName, prefs, trace, summary);
+                KBInstallZip(keyboard, target, fileName, prefs, trace, summary, YES);
             } else {
                 summary[@"ok"] = @NO;
                 summary[@"reason"] = failure ?: @"下载内容为空";
@@ -729,9 +837,17 @@ static void KBConvertIfNeeded(NSString *keyboard, NSString *incoming) {
     }
 }
 
-// 面板的「只用词库候选」开关：写一个小文件给探针读，省得探针去碰偏好域。
+// 把候选选项镜像为小文件，探针不直接读取设置偏好域。
 static void KBSyncSettings(NSString *keyboard) {
     NSDictionary *prefs = KBReadPrefs();
+    // 本地词库与自定义候选统一暂停；保留 active、索引和排除词。
+    BOOL localEnabled = prefs[@"localCandidates"] ? [prefs[@"localCandidates"] boolValue] : YES;
+    NSString *localPath = [keyboard stringByAppendingPathComponent:@"local-enabled"];
+    NSString *localText = localEnabled ? @"1" : @"0";
+    NSString *currentLocal = [NSString stringWithContentsOfFile:localPath encoding:NSUTF8StringEncoding error:NULL];
+    if (![localText isEqualToString:currentLocal]) {
+        [localText writeToFile:localPath atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    }
     // 「只用词库候选」：开着就写个空文件，关掉就删；探针每键读。
     BOOL on = [prefs[@"lexiconOnly"] boolValue];
     NSString *path = [keyboard stringByAppendingPathComponent:@"lexicon-only"];
@@ -742,8 +858,7 @@ static void KBSyncSettings(NSString *keyboard) {
         [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
     }
     // 候选数量：同样写文件。
-    NSInteger limit = [prefs[@"candidateLimit"] integerValue];
-    if (limit < 1 || limit > 10) limit = 5;
+    NSInteger limit = KBValidatedCandidateLimit([prefs[@"candidateLimit"] integerValue]);
     NSString *limitPath = [keyboard stringByAppendingPathComponent:@"candidate-limit"];
     NSString *text = [NSString stringWithFormat:@"%ld", (long)limit];
     NSString *current = [NSString stringWithContentsOfFile:limitPath encoding:NSUTF8StringEncoding error:NULL];
@@ -756,25 +871,36 @@ static void KBSyncSettings(NSString *keyboard) {
 static void KBScanLibraries(NSString *keyboard, NSDictionary *prefs, NSMutableDictionary *summary) {
     NSFileManager *manager = [NSFileManager defaultManager];
     NSString *libraries = KBLibrariesDirectory(keyboard);
-    NSMutableArray<NSString *> *trace = [NSMutableArray array];
+    NSMutableArray<NSString *> *failures = [NSMutableArray array];
     NSUInteger installed = 0, converted = 0;
+    NSError *error = nil;
+    NSArray *names = [manager contentsOfDirectoryAtPath:libraries error:&error];
+    if (!names) [failures addObject:@"无法读取词库目录"];
+    // 首次扫描也持久化空选择，避免启动时自动启用唯一词库。
+    if (names && ![manager fileExistsAtPath:KBActivePath(keyboard)] &&
+        ![@"" writeToFile:KBActivePath(keyboard) atomically:YES encoding:NSUTF8StringEncoding error:NULL]) {
+        [failures addObject:@"无法保留当前词库选择，已停止扫描"];
+        names = nil;
+    }
     BOOL commonOnly = prefs[@"commonOnly"] ? [prefs[@"commonOnly"] boolValue] : YES;
-    for (NSString *name in [manager contentsOfDirectoryAtPath:libraries error:NULL]) {
+    for (NSString *name in names) {
         if ([name hasPrefix:@"."]) continue;
         NSString *path = [libraries stringByAppendingPathComponent:name];
         BOOL isDirectory = NO;
         [manager fileExistsAtPath:path isDirectory:&isDirectory];
         if (!isDirectory) {
             if ([name.lowercaseString hasSuffix:@".zip"]) {
-                if (KBInstallZip(keyboard, path, name, prefs, trace, summary)) {
+                NSMutableDictionary *item = [NSMutableDictionary dictionary];
+                if (KBInstallZip(keyboard, path, name, prefs, [NSMutableArray array], item, NO)) {
                     installed++;
-                    [manager removeItemAtPath:path error:NULL];
+                    if (![manager removeItemAtPath:path error:NULL])
+                        [failures addObject:[name stringByAppendingString:@"：已导入，但源 ZIP 未能移除"]];
                 } else {
-                    // 装不进去就改名，免得每次下拉都重试一遍。
+                    [failures addObject:[NSString stringWithFormat:@"%@：%@", name, item[@"reason"] ?: @"导入失败"]];
                     [manager moveItemAtPath:path toPath:[path stringByAppendingString:@".failed"] error:NULL];
-                    [trace addObject:[NSString stringWithFormat:@"failed:%@", name]];
                 }
             }
+            continue;
         }
         if ([manager fileExistsAtPath:[path stringByAppendingPathComponent:@"index26.tsv"]]) continue;
         BOOL hasDictionary = NO;
@@ -782,22 +908,27 @@ static void KBScanLibraries(NSString *keyboard, NSDictionary *prefs, NSMutableDi
             if ([relative hasSuffix:@".dict.yaml"]) { hasDictionary = YES; break; }
         }
         if (!hasDictionary) continue;
-        [trace addObject:[NSString stringWithFormat:@"convert:%@", name]];
         KBSetConvertOptions([prefs[@"includeTraditional"] boolValue], [prefs[@"includeASCII"] boolValue]);
         KBSetCommonOnly(commonOnly);
-        KBSetExcludedWords(KBReadExcludedWords(keyboard, path));
+        KBSetExcludedWords(KBReadExcludedWords(path));
         BOOL ok = KBConvertDictionaries(path, path, ^(NSString *message) {
             os_log(KBInjectorLog, "scan convert: %{public}@", message);
         });
-        if (!ok) continue;
+        if (!ok) {
+            // 此分支进入时没有 index26；移除新半成品，修复源文件后仍可重扫。
+            unlink([path stringByAppendingPathComponent:@"index26.tsv"].fileSystemRepresentation);
+            [failures addObject:[name stringByAppendingString:@"：转换失败"]];
+            continue;
+        }
         KBWriteMeta(path, name, @"手动放入");
         converted++;
     }
-    summary[@"ok"] = @YES;
+    summary[@"ok"] = @(failures.count == 0);
     summary[@"scanned"] = @YES;
     summary[@"installed"] = @(installed);
     summary[@"converted"] = @(converted);
-    summary[@"trace"] = trace;
+    summary[@"failed"] = @(failures.count);
+    if (failures.count) summary[@"reason"] = [failures componentsJoinedByString:@"\n"];
 }
 
 static pid_t KBFindProcess(const char *name) {
@@ -920,7 +1051,7 @@ int main(void) {
             os_log(KBInjectorLog, "migrated legacy indexes");
         }
         // 自愈：只有一份词库却没有 active，就把它设为当前启用。
-        if (!KBReadActiveLibrary(keyboard).length) {
+        if (![[NSFileManager defaultManager] fileExistsAtPath:KBActivePath(keyboard)]) {
             NSArray<NSString *> *entries = [[NSFileManager defaultManager]
                 contentsOfDirectoryAtPath:KBLibrariesDirectory(keyboard) error:NULL];
             NSMutableArray<NSString *> *libraries = [NSMutableArray array];
@@ -957,8 +1088,18 @@ int main(void) {
         }
         pid_t injected = 0;
         int attempts = 0;
+        dispatch_semaphore_t wakeup = dispatch_semaphore_create(0);
+        int notificationToken = 0;
+        // Notifications only wake the existing loop; requests still pass all checks.
+        uint32_t notificationStatus = notify_register_dispatch(KBRespringNotification, &notificationToken,
+            dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(__unused int token) {
+                dispatch_semaphore_signal(wakeup);
+            });
+        if (notificationStatus != NOTIFY_STATUS_OK)
+            os_log_error(KBInjectorLog, "respring notification unavailable (%u); polling remains enabled", notificationStatus);
         for (;;) {
             @autoreleasepool {
+                KBRespringPoll(keyboard, root);
                 BOOL startCommand = NO;
                 @synchronized ([NSProcessInfo class]) {
                     KBTaskWrite(keyboard);
@@ -970,7 +1111,7 @@ int main(void) {
                 if (startCommand) {
                     dispatch_async(KBCommandQueue, ^{
                         @autoreleasepool {
-                            KBConvertIfNeeded(keyboard, incoming);
+                            KBConvertIfNeeded(keyboard);
                             @synchronized ([NSProcessInfo class]) { KBCommandRunning = NO; }
                         }
                     });
@@ -1013,7 +1154,7 @@ int main(void) {
                        [[NSFileManager defaultManager] fileExistsAtPath:[keyboard stringByAppendingPathComponent:@"index26.tsv"]] ? 1 : 0,
                        state[@"lastInject"] ?: @"-");
             }
-            sleep(2);
+            dispatch_semaphore_wait(wakeup, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
         }
     }
 }
