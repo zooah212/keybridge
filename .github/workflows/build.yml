@@ -105,35 +105,8 @@ jobs:
           deb=$(find packages -maxdepth 1 -name '*.deb' -type f | head -1)
           if [ -z "$deb" ]; then echo "error: no deb produced" >&2; exit 1; fi
           echo "→ $deb"
-          dpkg-deb -f "$deb" Package Version Architecture Depends
-          # 包内文件清单：路径固定在第 6 列（符号链接行的 $NF 是链接目标，不是路径）。
-          dpkg-deb -c "$deb"
-          list=$(dpkg-deb -c "$deb" | awk 'NF >= 6 { print $6 }')
-          # ./、var/、var/jb/ 是数据归档自带的祖先目录，不是漏在前缀外的文件，放行；
-          # 其余任何一条（含 DEBIAN/ 之外的一切）都必须落在 var/jb/ 下。
-          bad=$(printf '%s\n' "$list" | sed -e 's|/$||' -e 's|^\./||' \
-            | grep -v -e '^$' -e '^\.$' -e '^var$' -e '^var/jb$' -e '^var/jb/' -e '^DEBIAN/' || true)
-          if [ -n "$bad" ]; then
-            printf '%s\n' "$bad" >&2
-            echo "error: 有文件不在 /var/jb 前缀下（rootless 包必须是这套布局）" >&2
-            exit 1
-          fi
-          for path in \
-            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/KeyBridgePreferences \
-            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/Info.plist \
-            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/icon.png \
-            var/jb/Library/PreferenceLoader/Preferences/KeyBridge.plist \
-            var/jb/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.dylib \
-            var/jb/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.plist \
-            var/jb/usr/libexec/keybridge-injector; do
-            if ! printf '%s\n' "$list" | grep -qx "$path"; then
-              echo "error: missing $path" >&2; exit 1
-            fi
-          done
-          if printf '%s\n' "$list" | grep -q 'injector\.plist\.in'; then
-            echo "error: 旧的 plist 模板还在包里（应由 postinst 现场生成）" >&2; exit 1
-          fi
-          echo "✓ rootless 布局校验通过"
+          # 规则集中在 Tests/verify-rootless-deb.sh，与 CodeMagic 共用一份，避免两边漂移。
+          sh Tests/verify-rootless-deb.sh "$deb" "${{ steps.vars.outputs.version }}"
 
       - name: Prepare artifact
         run: |

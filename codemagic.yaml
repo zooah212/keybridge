@@ -124,61 +124,8 @@ workflows:
           export PATH="/opt/homebrew/opt/dpkg/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
           deb="KeyBridge-${VERSION}-rootless.deb"
           [ -f "$deb" ] || { echo "error: missing $deb" >&2; exit 1; }
-
-          dpkg-deb -f "$deb" Package Version Architecture Depends
-          if [ "$(dpkg-deb -f "$deb" Version)" != "$VERSION" ]; then
-            echo "error: version mismatch inside the deb" >&2
-            exit 1
-          fi
-
-          # 路径固定在 dpkg-deb -c 的第 6 列：符号链接行还会追加 "-> 目标"，
-          # 取 $NF 会拿到链接目标而不是路径。
-          list=$(dpkg-deb -c "$deb" | awk 'NF >= 6 { print $6 }')
-          # ./、var/、var/jb/ 是数据归档自带的祖先目录，不是漏在前缀外的文件。
-          bad=$(printf '%s\n' "$list" | sed -e 's|/$||' -e 's|^\./||' \
-            | grep -v -e '^$' -e '^\.$' -e '^var$' -e '^var/jb$' -e '^var/jb/' -e '^DEBIAN/' || true)
-          if [ -n "$bad" ]; then
-            printf '%s\n' "$bad" >&2
-            echo "error: 有文件不在 /var/jb 前缀下（rootless 包必须是这套布局）" >&2
-            exit 1
-          fi
-
-          for path in \
-            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/KeyBridgePreferences \
-            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/Info.plist \
-            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/icon.png \
-            var/jb/Library/PreferenceLoader/Preferences/KeyBridge.plist \
-            var/jb/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.dylib \
-            var/jb/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.plist \
-            var/jb/usr/libexec/keybridge-injector; do
-            if ! printf '%s\n' "$list" | grep -qx "$path"; then
-              echo "error: missing $path" >&2
-              exit 1
-            fi
-          done
-
-          # LaunchDaemon plist 必须由 Injector/postinst 现场生成，包里不许留模板。
-          if printf '%s\n' "$list" | grep -q 'injector\.plist\.in'; then
-            echo "error: 旧的 plist 模板还在包里（应由 postinst 现场生成）" >&2
-            exit 1
-          fi
-          # 维护脚本必须在包里且可执行、不能带 CRLF（带 CR 的 #!/bin/sh 会被 dpkg 认不出）。
-          tmpctl=$(mktemp -d)
-          dpkg-deb --control "$deb" "$tmpctl"
-          for maintainer_script in postinst prerm; do
-            if [ ! -x "$tmpctl/$maintainer_script" ]; then
-              echo "error: DEBIAN/$maintainer_script 缺失或不可执行" >&2
-              rm -rf "$tmpctl"
-              exit 1
-            fi
-            if grep -q $'\r' "$tmpctl/$maintainer_script"; then
-              echo "error: DEBIAN/$maintainer_script 带 CRLF，设备上不认这个 #!/bin/sh" >&2
-              rm -rf "$tmpctl"
-              exit 1
-            fi
-          done
-          rm -rf "$tmpctl"
-          echo "✓ rootless 布局校验通过"
+          # 规则集中在 Tests/verify-rootless-deb.sh，与 .github/workflows/build.yml 共用一份。
+          sh Tests/verify-rootless-deb.sh "$deb" "$VERSION"
 
       - name: Final package listing
         script: |
