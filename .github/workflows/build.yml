@@ -106,11 +106,17 @@ jobs:
           if [ -z "$deb" ]; then echo "error: no deb produced" >&2; exit 1; fi
           echo "→ $deb"
           dpkg-deb -f "$deb" Package Version Architecture Depends
-          # 包内文件清单：取每行最后一个字段并去掉开头的 ./（dpkg-deb -c 的列数会随文件类型变）
-          list=$(dpkg-deb -c "$deb" | awk '{print $NF}' | sed 's|^\./||')
-          printf '%s\n' "$list"
-          if printf '%s\n' "$list" | grep -v '^var/jb/' | grep -v '^DEBIAN/'; then
-            echo "error: 有文件不在 /var/jb 前缀下（rootless 包必须是这套布局）" >&2; exit 1
+          # 包内文件清单：路径固定在第 6 列（符号链接行的 $NF 是链接目标，不是路径）。
+          dpkg-deb -c "$deb"
+          list=$(dpkg-deb -c "$deb" | awk 'NF >= 6 { print $6 }')
+          # ./、var/、var/jb/ 是数据归档自带的祖先目录，不是漏在前缀外的文件，放行；
+          # 其余任何一条（含 DEBIAN/ 之外的一切）都必须落在 var/jb/ 下。
+          bad=$(printf '%s\n' "$list" | sed -e 's|/$||' -e 's|^\./||' \
+            | grep -v -e '^$' -e '^\.$' -e '^var$' -e '^var/jb$' -e '^var/jb/' -e '^DEBIAN/' || true)
+          if [ -n "$bad" ]; then
+            printf '%s\n' "$bad" >&2
+            echo "error: 有文件不在 /var/jb 前缀下（rootless 包必须是这套布局）" >&2
+            exit 1
           fi
           for path in \
             var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/KeyBridgePreferences \
