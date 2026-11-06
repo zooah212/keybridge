@@ -551,5 +551,5 @@ BOOL KBConvertDictionaries(NSString *incomingDirectory, NSString *destinationDir
     [[NSFileManager defaultManager] removeItemAtPath:work26 error:NULL];
     [[NSFileManager defaultManager] removeItemAtPath:work9 error:NULL];
     log([NSString stringWithFormat:@"index26=%d(%.1f MB) index9=%d(%.1f MB)", ok26, size26 / 1048576.0, ok9, size9 / 1048576.0]);
-    return ok26;
+    return ok26 && ok9;
 }

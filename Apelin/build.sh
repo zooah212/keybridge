@@ -38,8 +38,9 @@ compile_objc() {
   arch=$1 out=$2
   for source in ImportPreferences/KBImportController.m; do
     name=$(basename "$source" .m)
-    clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=16.3 -O2 \
+    clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=15.0 -O2 \
       -fobjc-arc -fblocks -Wall -Wextra \
+      -DAPELIN_BUILD_ID="\"$APELIN_BUILD_ID\"" \
       -I Importer -I Apelin/include \
       -c "$source" -o "$out/$name.o"
   done
@@ -47,7 +48,7 @@ compile_objc() {
 
 link_bundle() {
   arch=$1 out=$2
-  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=16.3 -bundle -fobjc-arc \
+  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=15.0 -bundle -fobjc-arc \
     -o "$out/KeyBridgePreferences" "$out"/KBImportController.o \
     -F Apelin/stubs -framework Preferences \
     -framework Foundation -framework UIKit -framework UniformTypeIdentifiers -framework CoreGraphics
@@ -69,8 +70,21 @@ link_probe() {
       ;;
     *) echo "error: KEYBRIDGE_LOOKUP_BENCHMARK must be 0 or 1" >&2; exit 1 ;;
   esac
-  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=16.3 -O2 \
+  trace=0
+  case "${KEYBRIDGE_CANDIDATE_TRACE:-0}" in
+    0) ;;
+    1)
+      if [ "${APELIN_CONFIGURATION:-debug}" = release ]; then
+        echo "error: candidate trace is diagnostic-only; use a debug build" >&2
+        exit 1
+      fi
+      trace=1
+      ;;
+    *) echo "error: KEYBRIDGE_CANDIDATE_TRACE must be 0 or 1" >&2; exit 1 ;;
+  esac
+  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=15.0 -O2 \
     -fobjc-arc -fblocks -dynamiclib -DKB_LOOKUP_BENCHMARK="$diagnostics" \
+    -DKB_CANDIDATE_TRACE="$trace" \
     -DAPELIN_BUILD_ID="\"$APELIN_BUILD_ID\"" \
     -o "$out/KeyBridgeProbe.dylib" Probe/KeyBridgeProbe.m \
     -framework Foundation
@@ -79,7 +93,7 @@ link_probe() {
 # 守护进程（root）：ellekit 不注入系统守护进程，由它把探针送进 kbd。
 link_injector() {
   arch=$1 out=$2
-  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=16.3 -O2 \
+  clang -arch "$arch" -isysroot "$SDKROOT" -mios-version-min=15.0 -O2 \
     -fobjc-arc -DNOUNCRYPT -DMINIZIP_FOPEN_NO_64 -o "$out/keybridge-injector" Injector/KeyBridgeInjector.m Injector/KeyBridgeConvert.m Injector/KeyBridgeUnzip.m Injector/KeyBridgeCustom.m \
     Importer/vendor/minizip/unzip.c Importer/vendor/minizip/ioapi.c \
     -framework Foundation -lz -I Importer/vendor/minizip
@@ -108,8 +122,13 @@ else
   lipo -create "$obj/arm64/keybridge-injector" "$obj/arm64e/keybridge-injector" -output "$injector"
 fi
 cp ImportPreferences/Resources/Info.plist "$bundle/Info.plist"
+cp Assets/KeyBridge.png "${bundle:?}/KeyBridge.png"
+for icon in icon.png icon@2x.png icon@3x.png; do
+  cp "ImportPreferences/Resources/${icon:?}" "${bundle:?}/${icon:?}"
+  chmod 0644 "${bundle:?}/${icon:?}"
+done
 chmod 0755 "$bundle/KeyBridgePreferences"
-chmod 0644 "$bundle/Info.plist"
+chmod 0644 "$bundle/Info.plist" "${bundle:?}/KeyBridge.png"
 ldid -S "$bundle/KeyBridgePreferences"
 
 # 包内路径相对 bootstrap，roothide 下 APELIN_PREFIX 为空。
@@ -142,20 +161,20 @@ chmod 0755 "$payload/DEBIAN/postinst" "$payload/DEBIAN/prerm"
 {
   printf 'Package: com.wm0104.keybridge\n'
   printf 'Name: 词库桥接\n'
-  printf 'Version: 0.0.1\n'
+  printf 'Version: 0.0.2\n'
   printf 'Architecture: %s\n' "$APELIN_ARCHITECTURE"
-  printf 'Description: Local Rime dictionary candidates for Apple Chinese 26-key and nine-key keyboards.\n'
+  printf 'Description: 为苹果原生中文键盘接入本地 Rime 词库，支持 26 键全拼与九宫格。兼容测试范围：iOS 15.0–16.x；目前仅在 iOS 16.3（roothide）真机验证。特别感谢 i_82（Apelin 作者）提供的开发支持。\n'
   printf 'Icon: https://raw.githubusercontent.com/wm0104/keybridge/main/Assets/KeyBridge.png\n'
   printf 'Maintainer: wm0104\n'
   printf 'Author: wm0104\n'
-  printf 'Section: Addons\n'
-  printf 'Depends: mobilesubstrate, preferenceloader, firmware (>= 16.3), firmware (<< 17.0)\n'
+  printf 'Section: 键盘增强\n'
+  printf 'Depends: mobilesubstrate, preferenceloader, firmware (>= 15.0), firmware (<< 17.0)\n'
 } > "$payload/DEBIAN/control"
 
-deb="$APELIN_PACKAGE_DIR/KeyBridge_0.0.1_${APELIN_ARCHITECTURE}.deb"
-rm -f -- "$deb"
+deb="$APELIN_PACKAGE_DIR/KeyBridge_0.0.2_${APELIN_ARCHITECTURE}.deb"
+rm -f -- "${deb:?}"
 if ! dpkg-deb --build --root-owner-group "$payload" "$deb" 2>"$stage/dpkg.err"; then
-  rm -f -- "$deb"
+  rm -f -- "${deb:?}"
   dpkg-deb --build "$payload" "$deb"
 fi
 echo "built $deb"

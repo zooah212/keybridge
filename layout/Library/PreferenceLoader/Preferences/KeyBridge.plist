@@ -6,4 +6,5 @@
 <key>detail</key><string>KBImportController</string>
 <key>isController</key><true/>
 <key>label</key><string>词库桥接</string>
+<key>icon</key><string>icon.png</string>
 </dict></dict></plist>
