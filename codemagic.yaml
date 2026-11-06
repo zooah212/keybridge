@@ -1,0 +1,195 @@
+workflows:
+  build-keybridge:
+    name: Build KeyBridge (rootless single package)
+    max_build_duration: 30
+    instance_type: mac_mini_m1
+    environment:
+      xcode: latest
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: main
+          include: true
+        - pattern: '*'
+          include: false
+    scripts:
+      - name: Install build dependencies
+        script: |
+          #!/bin/bash
+          set -e
+          # 兼容 Apple Silicon 与 Intel 的 Homebrew 位置：build.sh 直接调 dpkg-deb。
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+          if ! command -v dpkg-deb &> /dev/null; then
+            brew install dpkg
+          fi
+
+          # 本项目的编译入口是 Apelin/build.sh（clang + ldid + dpkg-deb 直接出包），
+          # 不用 Theos，所以这里只补 ldid 一个工具。Homebrew bottle 优先；
+          # 装不上再回退到源码编译（要锁 openssl@3，openssl@4 会让 ldid 源码报错）。
+          if ! command -v ldid &> /dev/null; then
+            echo "→ Installing ldid..."
+            if ! brew install ldid; then
+              echo "→ ldid bottle unavailable, building from source against openssl@3"
+              export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
+              brew install libplist pkg-config openssl@3
+              export PKG_CONFIG_PATH="/opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+              git clone --depth 1 https://github.com/ProcursusTeam/ldid.git /tmp/ldid-build
+              pushd /tmp/ldid-build > /dev/null
+              make -j"$(sysctl -n hw.ncpu)" 2>/dev/null || make
+              mkdir -p "$HOME/bin"
+              cp -f ldid "$HOME/bin/ldid"
+              popd > /dev/null
+              rm -rf /tmp/ldid-build
+              export PATH="$HOME/bin:$PATH"
+            fi
+            echo "✓ ldid ready"
+          fi
+
+          command -v dpkg-deb || { echo "error: dpkg-deb unavailable" >&2; exit 1; }
+          command -v ldid || { echo "error: ldid unavailable" >&2; exit 1; }
+
+      - name: Resolve build vars
+        script: |
+          #!/bin/bash
+          set -e
+          # 版本与形态只由 Apelin/build.sh 的 kb_resolve_scheme 决定，避免同一个
+          # 版本号在脚本和两份 CI 里各写一遍。PRINT_VARS_ONLY 模式只解析不编译。
+          export TMPDIR="${TMPDIR:-$(mktemp -d)}"
+          line=$(KEYBRIDGE_PRINT_VARS_ONLY=1 APELIN_PROJECT_ROOT="$PWD" \
+            APELIN_PACKAGE_DIR="$PWD/packages" APELIN_BOOTSTRAP=/var/jb \
+            APELIN_ARCHITECTURE=iphoneos-arm64 APELIN_BUILD_ID=vars-only \
+            APELIN_PREFIX=/var/jb KEYBRIDGE_SCHEME=rootless \
+            SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)" sh Apelin/build.sh)
+          echo "resolved: $line"
+          VERSION=$(printf '%s\n' "$line" | tr ' ' '\n' | sed -n 's/^version=//p')
+          if [ -z "$VERSION" ]; then
+            echo "error: cannot resolve version" >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$line" | grep -qx 'scheme=rootless'; then
+            echo "error: scheme resolution is not rootless: $line" >&2
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $CM_ENV
+          echo "✓ version=$VERSION"
+
+      - name: Build rootless variant
+        script: |
+          #!/bin/bash
+          set -e
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          export TMPDIR="${TMPDIR:-$(mktemp -d)}"
+          mkdir -p packages && rm -f packages/*.deb
+
+          echo "→ [rootless] Building..."
+          APELIN_PROJECT_ROOT="$PWD" \
+          APELIN_PACKAGE_DIR="$PWD/packages" \
+          APELIN_BOOTSTRAP=/var/jb \
+          APELIN_ARCHITECTURE=iphoneos-arm64 \
+          APELIN_BUILD_ID="${CM_COMMIT:-$(git rev-parse HEAD)}" \
+          APELIN_CONFIGURATION=release \
+          APELIN_PREFIX=/var/jb \
+          KEYBRIDGE_SCHEME=rootless \
+          KEYBRIDGE_VERSION="$VERSION" \
+          SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)" \
+            sh Apelin/build.sh
+          echo "✓ [rootless] Build complete"
+
+          DEB_FILE=$(find packages -maxdepth 1 -name 'KeyBridge_*.deb' -type f | head -1)
+          if [ -z "$DEB_FILE" ]; then
+            echo "ERROR: [rootless] build produced no deb" >&2
+            find . -name '*.deb' -type f 2>/dev/null || true
+            exit 1
+          fi
+          # 产物名与 .github/workflows/build.yml 保持一致：KeyBridge-<版本>-rootless.deb，
+          # 平铺到仓库根，CodeMagic 工件就不再套 packages/ 目录。
+          cp "$DEB_FILE" "KeyBridge-${VERSION}-rootless.deb"
+          echo "✓ [rootless] KeyBridge-${VERSION}-rootless.deb"
+
+      # ══ roothide 变体：不在 CI 上打包（保留说明，省 CI 额度）═══════════
+      # 包内路径与 jbroot 视图绑定（前缀为空、装机时由 vroot 改写），runner 上
+      # 造不出来也没有真机可验；要出 roothide 包就在本机走 Apelin 构建：
+      #   KEYBRIDGE_SCHEME=roothide APELIN_PREFIX=/ APELIN_ARCHITECTURE=iphoneos-arm64e \
+      #   sh Apelin/build.sh
+      # 若日后确认可以在 CI 上出这个包，把上面的产物名改回带 -rootless 后缀，
+      # 并在 artifacts: 里同时列出两个带后缀的 packages/ glob（build.yml 同步改）。
+
+      - name: Verify package layout
+        script: |
+          #!/bin/bash
+          set -e
+          export PATH="/opt/homebrew/opt/dpkg/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          deb="KeyBridge-${VERSION}-rootless.deb"
+          [ -f "$deb" ] || { echo "error: missing $deb" >&2; exit 1; }
+
+          dpkg-deb -f "$deb" Package Version Architecture Depends
+          if [ "$(dpkg-deb -f "$deb" Version)" != "$VERSION" ]; then
+            echo "error: version mismatch inside the deb" >&2
+            exit 1
+          fi
+
+          # 路径固定在 dpkg-deb -c 的第 6 列：符号链接行还会追加 "-> 目标"，
+          # 取 $NF 会拿到链接目标而不是路径。
+          list=$(dpkg-deb -c "$deb" | awk 'NF >= 6 { print $6 }')
+          # ./、var/、var/jb/ 是数据归档自带的祖先目录，不是漏在前缀外的文件。
+          bad=$(printf '%s\n' "$list" | sed -e 's|/$||' -e 's|^\./||' \
+            | grep -v -e '^$' -e '^\.$' -e '^var$' -e '^var/jb$' -e '^var/jb/' -e '^DEBIAN/' || true)
+          if [ -n "$bad" ]; then
+            printf '%s\n' "$bad" >&2
+            echo "error: 有文件不在 /var/jb 前缀下（rootless 包必须是这套布局）" >&2
+            exit 1
+          fi
+
+          for path in \
+            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/KeyBridgePreferences \
+            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/Info.plist \
+            var/jb/Library/PreferenceBundles/KeyBridgePreferences.bundle/icon.png \
+            var/jb/Library/PreferenceLoader/Preferences/KeyBridge.plist \
+            var/jb/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.dylib \
+            var/jb/Library/MobileSubstrate/DynamicLibraries/KeyBridgeProbe.plist \
+            var/jb/usr/libexec/keybridge-injector; do
+            if ! printf '%s\n' "$list" | grep -qx "$path"; then
+              echo "error: missing $path" >&2
+              exit 1
+            fi
+          done
+
+          # LaunchDaemon plist 必须由 Injector/postinst 现场生成，包里不许留模板。
+          if printf '%s\n' "$list" | grep -q 'injector\.plist\.in'; then
+            echo "error: 旧的 plist 模板还在包里（应由 postinst 现场生成）" >&2
+            exit 1
+          fi
+          # 维护脚本必须在包里且可执行、不能带 CRLF（带 CR 的 #!/bin/sh 会被 dpkg 认不出）。
+          tmpctl=$(mktemp -d)
+          dpkg-deb --control "$deb" "$tmpctl"
+          for maintainer_script in postinst prerm; do
+            if [ ! -x "$tmpctl/$maintainer_script" ]; then
+              echo "error: DEBIAN/$maintainer_script 缺失或不可执行" >&2
+              rm -rf "$tmpctl"
+              exit 1
+            fi
+            if grep -q $'\r' "$tmpctl/$maintainer_script"; then
+              echo "error: DEBIAN/$maintainer_script 带 CRLF，设备上不认这个 #!/bin/sh" >&2
+              rm -rf "$tmpctl"
+              exit 1
+            fi
+          done
+          rm -rf "$tmpctl"
+          echo "✓ rootless 布局校验通过"
+
+      - name: Final package listing
+        script: |
+          #!/bin/bash
+          set -e
+          echo "============================================"
+          echo "最终打包产物:"
+          ls -lh KeyBridge-*.deb
+          ls -lh packages/*.deb
+          echo "============================================"
+
+    artifacts:
+      # 单包：KeyBridge-<版本>-rootless.deb，平铺在仓库根，不套目录。
+      - KeyBridge-*.deb

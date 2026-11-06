@@ -53,7 +53,7 @@ iOS 15.0–16.x 兼容测试范围，不代表所有版本均已验证。
 
 ## 适用环境
 
-iOS 15–17，rootless 与 roothide 越狱都可以（上游真机验证到 iOS 16.3 roothide，iOS 15 rootless 仍待实机确认）。两个包由同一套脚本产出：rootless 包在 GitHub Actions 上打（Actions ▸ Build KeyBridge，只出 `-rootless.deb`），roothide 包在本机 Apelin 构建。装完在设置页导入词库，不用重启；后台状态看 `/var/mobile/Library/Keyboard/KeyBridge/install.log` 与 `KeyBridgeInjector.json`。
+iOS 15–17，rootless 与 roothide 越狱都可以（上游真机验证到 iOS 16.3 roothide，iOS 15 rootless 仍待实机确认）。两个包由同一套脚本产出：rootless 包在 CI 上打（GitHub Actions ▸ Build KeyBridge，或 CodeMagic 的 `build-keybridge`，都只出 `-rootless.deb`），roothide 包在本机 Apelin 构建。装完在设置页导入词库，不用重启；后台状态看 `/var/mobile/Library/Keyboard/KeyBridge/install.log` 与 `KeyBridgeInjector.json`。
 
 ## 致谢
 
