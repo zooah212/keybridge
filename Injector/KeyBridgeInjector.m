@@ -763,9 +763,19 @@ static void KBConvertIfNeeded(NSString *keyboard) {
     if (zipAt > [handled[@"zipAt"] doubleValue] && pendingZip) {
         KBTaskBegin(keyboard, summary, zipAt);
         handled[@"zipAt"] = @(zipAt);
-        KBInstallZip(keyboard, KBRealPath(pendingZip),
+        // 新协议：面板先把 zip 拷进共享 incoming/<uuid>-<名>，这里按 daemon 自己视图下
+        // 的 keyboard 目录取件，不再依赖能跨进程读面板 App 沙盒、也不必猜 jbroot/真实根。
+        // 兼容旧面板直传沙盒路径：root 守护进程仍可按原路径或 KBRealPath 读到。
+        NSString *incomingZip = [keyboard stringByAppendingPathComponent:
+            [@"incoming" stringByAppendingPathComponent:pendingZip.lastPathComponent]];
+        NSString *sourcePath = KBFirstExisting(@[incomingZip, pendingZip, KBRealPath(pendingZip)]);
+        if (!sourcePath) sourcePath = incomingZip; // 交给 KBInstallZip 记录明确的失败原因
+        KBInstallZip(keyboard, sourcePath,
                      pendingZipName.length ? pendingZipName : pendingZip.lastPathComponent,
                      prefs, trace, summary, YES);
+        // 共享 incoming 的临时件只服务本次导入，装完（无论成败）清掉；沙盒原件不归这里管。
+        if ([sourcePath isEqualToString:incomingZip])
+            [manager removeItemAtPath:incomingZip error:NULL];
         KBWriteHandled(keyboard, handled);
         KBWriteSummary(summary, keyboard);
         return;
@@ -1034,6 +1044,9 @@ int main(void) {
         os_log(KBInjectorLog, "started root=%{public}@", root ?: @"?");
         if (!root.length) return 1;
 
+        // 面板写 /var/mobile/Library/Keyboard/KeyBridge；roothide 下守护进程在 jbroot
+        // 视图，经 KBRealPath 落到 /rootfs/private/var/mobile/... 才能与面板见到同一份
+        // 共享 Keyboard 目录（0.0.1 起在 iOS 16.3 roothide 上验证过）。
         NSString *keyboard = KBRealPath(@"/var/mobile/Library/Keyboard/KeyBridge");
         // 旧布局（索引直接在 KeyBridge 下）迁移成一份词库，避免升级后候选突然没了。
         NSString *legacyIndex = [keyboard stringByAppendingPathComponent:@"index26.tsv"];

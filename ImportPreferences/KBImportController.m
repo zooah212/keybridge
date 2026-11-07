@@ -964,14 +964,30 @@ static void KBStyleSettingsCell(UITableViewCell *cell, UIListContentConfiguratio
     [self beginBusy:@"正在接收词库文件…" stamp:0];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         BOOL scoped = [source startAccessingSecurityScopedResource];
+        NSFileManager *manager = [NSFileManager defaultManager];
+        // 面板沙盒里的路径守护进程访问不到，先拷到双方都能访问的 incoming/。
+        NSString *incomingDir = [KBKeyboardDirectory stringByAppendingPathComponent:@"incoming"];
+        [manager createDirectoryAtPath:incomingDir withIntermediateDirectories:YES attributes:nil error:NULL];
+        NSString *sharedName = [NSString stringWithFormat:@"%@-%@",
+                                NSUUID.UUID.UUIDString, source.lastPathComponent];
+        NSString *sharedPath = [incomingDir stringByAppendingPathComponent:sharedName];
+        NSError *copyError = nil;
+        BOOL copied = [manager copyItemAtURL:source toURL:[NSURL fileURLWithPath:sharedPath] error:&copyError];
+        if (scoped) [source stopAccessingSecurityScopedResource];
+        if (!copied) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self finishBusy:[NSString stringWithFormat:@"无法保存词库文件：%@",
+                                   copyError.localizedDescription ?: @"未知错误"]];
+            });
+            return;
+        }
         NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:KBDefaultsSuite];
         NSTimeInterval stamp = [NSDate date].timeIntervalSince1970;
-        [defaults setObject:source.path forKey:@"pendingZipPath"];
+        [defaults setObject:sharedPath forKey:@"pendingZipPath"];
         [defaults setObject:source.lastPathComponent forKey:@"pendingZipName"];
         [defaults setDouble:stamp forKey:@"pendingZipAt"];
         [defaults setDouble:stamp forKey:@"requestStamp"];
         [defaults synchronize];
-        if (scoped) [source stopAccessingSecurityScopedResource];
         dispatch_async(dispatch_get_main_queue(), ^{
             [self beginBusy:@"正在解压并生成索引…" stamp:stamp];
         });

@@ -34,7 +34,7 @@ kb_resolve_scheme() {
   esac
   # 上界不再写死：和 SwipeDeck 一样只声明下限，iOS 15/16/17 都能装。
   min_ios="${KEYBRIDGE_MIN_IOS:-15.0}"
-  version="${KEYBRIDGE_VERSION:-0.0.3}"
+  version="${KEYBRIDGE_VERSION:-0.0.4}"
   firmware_dep="firmware (>= $min_ios)"
   # 一行一个字段：firmware 的值本身带空格，写成一行会被下游拆分切碎。
   printf 'scheme=%s\nprefix=%s\nmin_ios=%s\nversion=%s\nfirmware=%s\n' \
